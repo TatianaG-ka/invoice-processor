@@ -1,0 +1,150 @@
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============================================
+# Virtual environments
+# ============================================
+venv/
+.venv/
+env/
+.env/
+ENV/
+gradio-env/
+
+# ============================================
+# Testing / Coverage
+# ============================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ============================================
+# Type checking / Linting
+# ============================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ============================================
+# Environment / Secrets (KRYTYCZNE!)
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+!.env.example
+*.key
+*.pem
+credentials.json
+service-account*.json
+secrets/
+
+# ============================================
+# IDE / OS
+# ============================================
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================
+# Claude Code / AI tooling (PRIVATE)
+# ============================================
+.claude/
+CLAUDE.md
+MEMORY.md
+
+# ============================================
+# Planning docs (są lokalnie w _PLANNING_IN4GE/)
+# Fallback gdyby ktoś przypadkiem wrzucił do invoice_processor/
+# ============================================
+STRATEGIA_*.md
+PLAN_*.md
+JOURNAL.md
+SECURITY_AUDIT.md
+PLAN_REVIEW_REPORT.md
+dev/
+
+# ============================================
+# Project specific - upload files
+# ============================================
+uploads/
+temp/
+tmp/
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.docx
+# Wyjątki - testowe pliki w fixtures / diagramy
+!tests/fixtures/*.pdf
+!tests/fixtures/*.jpg
+!tests/fixtures/*.png
+!tests/fixtures/*.xml
+!docs/diagrams/*.png
+!docs/dane_testowe/*.pdf
+
+# ============================================
+# Docker
+# ============================================
+.dockerignore.local
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# ML models (za duże dla git, pobierać w buildzie)
+# ============================================
+models/
+app/models/
+*.bin
+*.pt
+*.pth
+*.onnx
