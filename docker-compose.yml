@@ -1,0 +1,56 @@
+# ============================================
+# Invoice Processor - docker-compose (v1 MVP)
+# ============================================
+# Ta wersja dla tygodnia 1 (dzień 5).
+# Rozbuduj w tygodniu 2 o serwisy redis, worker, qdrant.
+#
+# Zobacz docker-compose.v2.yml dla pełnej wersji PRO.
+#
+# Uruchomienie:
+#   docker-compose up --build
+#
+# Zatrzymanie:
+#   docker-compose down
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: invoice-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://invoice_user:invoice_pass@postgres:5432/invoices
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      # Hot reload - zmiany w kodzie bez restartu kontenera
+      - ./app:/code/app
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: invoice-postgres
+    environment:
+      POSTGRES_USER: invoice_user
+      POSTGRES_PASSWORD: invoice_pass
+      POSTGRES_DB: invoices
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invoice_user -d invoices"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

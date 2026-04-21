@@ -1,0 +1,46 @@
+# Nie kopiuj do Docker image - zmniejszy rozmiar
+
+# Venv
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Secrets
+.env
+.env.local
+
+# Testy
+tests/
+pytest.ini
+
+# Dokumentacja
+docs/
+*.md
+!README.md
+
+# CI
+.github/
+
+# Lokalne pliki
+uploads/
+*.log
+JOURNAL.md
+
+# OS
+.DS_Store
+Thumbs.db

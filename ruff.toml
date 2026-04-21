@@ -1,0 +1,28 @@
+# ruff config - szybki linter Python
+# https://docs.astral.sh/ruff/
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (sortowanie importów)
+    "B",    # flake8-bugbear (typowe bugi)
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+]
+
+ignore = [
+    "E501",  # line too long - czasem nie da się skrócić
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101"]  # assert OK w testach
+
+[format]
+quote-style = "double"
+indent-style = "space"
