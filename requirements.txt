@@ -11,6 +11,9 @@ fastapi==0.115.0
 uvicorn[standard]==0.32.0
 python-multipart==0.0.12
 
+# --- Phase 1: PDF text extraction (primary, text-PDFs) ---
+pdfplumber==0.11.4
+
 # --- Tydzień 1 Dzień 2: OCR + OpenAI ---
 pytesseract==0.3.13
 pdf2image==1.17.0

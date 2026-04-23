@@ -22,13 +22,11 @@ from pathlib import Path
 def generate_sample_invoice():
     """Generuje testową fakturę PDF z fikcyjnymi danymi."""
     try:
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet
         from reportlab.lib.units import cm
-        from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-        )
-        from reportlab.lib import colors
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except ImportError:
         print("❌ Brak reportlab. Zainstaluj: pip install reportlab")
         return
@@ -69,15 +67,19 @@ def generate_sample_invoice():
         ],
     ]
     table1 = Table(seller_buyer, colWidths=[8 * cm, 8 * cm])
-    table1.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
+    table1.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
     story.append(table1)
     story.append(Spacer(1, 1 * cm))
 
@@ -89,14 +91,18 @@ def generate_sample_invoice():
         ["3.", "Szkolenie zespołu", "2 dni", "1 500,00 zł", "23%", "3 690,00 zł"],
     ]
     table2 = Table(items, colWidths=[1.5 * cm, 6 * cm, 2 * cm, 2.5 * cm, 1.5 * cm, 3 * cm])
-    table2.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
+    table2.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
     story.append(table2)
     story.append(Spacer(1, 0.5 * cm))
 
@@ -109,7 +115,9 @@ def generate_sample_invoice():
 
     # Sposób płatności
     story.append(Paragraph("<b>Sposób płatności:</b> przelew", styles["Normal"]))
-    story.append(Paragraph("<b>Numer konta:</b> 12 3456 7890 1234 5678 9012 3456", styles["Normal"]))
+    story.append(
+        Paragraph("<b>Numer konta:</b> 12 3456 7890 1234 5678 9012 3456", styles["Normal"])
+    )
 
     # Generuj
     doc.build(story)
