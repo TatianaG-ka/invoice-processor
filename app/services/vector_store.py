@@ -92,6 +92,30 @@ _client: QdrantClient | None = None
 _store: VectorStore | None = None
 
 
+def _build_client(qdrant_url: str) -> QdrantClient:
+    """Instantiate a :class:`QdrantClient` from a URL-ish setting.
+
+    Three shapes are supported, matching three deploy targets:
+
+    * ``":memory:"`` — fully in-process store, no persistence. Used
+      in tests and also in the Cloud Run deploy (the filesystem is
+      ephemeral anyway, so disk persistence would gain nothing; the
+      lifespan ``reindex_all`` call rebuilds the index from Postgres
+      on every cold start).
+    * ``"file:///abs/path"`` — on-disk embedded mode. For a self-hosted
+      container with a mounted volume where reindexing every boot
+      would be too expensive.
+    * Anything else is passed as ``url=...`` (server mode) — the
+      docker-compose development setup, the future escape hatch if
+      we ever move to Qdrant Cloud.
+    """
+    if qdrant_url == ":memory:":
+        return QdrantClient(":memory:")
+    if qdrant_url.startswith("file://"):
+        return QdrantClient(path=qdrant_url.removeprefix("file://"))
+    return QdrantClient(url=qdrant_url)
+
+
 def get_store() -> VectorStore:
     """Return the lazily-constructed vector store singleton.
 
@@ -101,7 +125,7 @@ def get_store() -> VectorStore:
     """
     global _client, _store
     if _store is None:
-        _client = QdrantClient(url=settings.QDRANT_URL)
+        _client = _build_client(settings.QDRANT_URL)
         _store = VectorStore(client=_client, collection=settings.QDRANT_COLLECTION)
         _store.ensure_collection()
     return _store
