@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from langfuse.decorators import langfuse_context, observe
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -38,6 +39,18 @@ from app.schemas.invoice import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _langfuse_enabled() -> bool:
+    """True only when the Langfuse SDK has credentials to talk home.
+
+    Used as a gate around ``langfuse_context.update_current_observation``
+    — that call validates its arguments even when the SDK is disabled,
+    so calling it in CI (where the keys are blank) raises spurious
+    ``ValueError`` onto stderr. Cheapest fix: skip it when we know
+    tracing is off.
+    """
+    return bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
 
 
 class InvoiceExtractionError(RuntimeError):
@@ -126,6 +139,7 @@ def _mock_extraction(text: str) -> ExtractedInvoice:  # noqa: ARG001
     )
 
 
+@observe(as_type="generation", name="openai-invoice-extraction")
 @retry(
     retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError)),
     stop=stop_after_attempt(3),
@@ -138,6 +152,11 @@ def _call_openai(text: str) -> LLMInvoiceResponse:
     Retries only on transient failures (connection, timeout, rate
     limit). Auth errors, bad-request errors and malformed JSON all
     propagate after the first attempt.
+
+    Wrapped with Langfuse ``@observe(as_type="generation")`` so every
+    live call ships to the configured project as a generation trace.
+    The decorator is a no-op when ``LANGFUSE_PUBLIC_KEY`` is blank
+    (CI, local dev), so turning observability off costs nothing.
     """
     client = _get_client()
     completion = client.beta.chat.completions.parse(
@@ -155,8 +174,27 @@ def _call_openai(text: str) -> LLMInvoiceResponse:
     parsed = completion.choices[0].message.parsed
     if parsed is None:
         raise InvoiceExtractionError(
-            "OpenAI returned no parsed payload — possibly refused or " "produced malformed JSON."
+            "OpenAI returned no parsed payload — possibly refused or produced malformed JSON."
         )
+
+    # Enrich the Langfuse trace with model + token usage. Only do this
+    # when tracing is actually enabled: ``update_current_observation``
+    # validates its arguments even on a disabled SDK, and we don't
+    # want stderr noise in CI. A belt-and-braces try/except keeps any
+    # future Langfuse API quirk from taking down extraction.
+    if _langfuse_enabled():
+        try:
+            langfuse_context.update_current_observation(
+                model=settings.OPENAI_MODEL,
+                usage={
+                    "promptTokens": completion.usage.prompt_tokens,
+                    "completionTokens": completion.usage.completion_tokens,
+                    "totalTokens": completion.usage.total_tokens,
+                },
+            )
+        except Exception:  # noqa: BLE001 — observability must not break extraction
+            logger.exception("Langfuse observation update failed (non-fatal)")
+
     return parsed
 
 

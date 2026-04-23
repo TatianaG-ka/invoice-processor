@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # --- OCR ---
     OCR_LANGUAGES: str = "pol+eng"
 
+    # --- Observability (Langfuse) ---
+    # All three blank by default: the Langfuse SDK reads them straight
+    # from env on first use and degrades to a no-op when unset (CI,
+    # local dev without an account). Production sets all three via
+    # Cloud Run secret bindings.
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
