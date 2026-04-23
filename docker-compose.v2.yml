@@ -20,7 +20,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://invoice_user:invoice_pass@postgres:5432/invoices
+      # asyncpg driver — the app uses SQLAlchemy async engine.
+      - DATABASE_URL=postgresql+asyncpg://invoice_user:invoice_pass@postgres:5432/invoices
       - REDIS_URL=redis://redis:6379
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_COLLECTION=invoices
@@ -46,13 +47,16 @@ services:
       dockerfile: Dockerfile
     container_name: invoice-worker
     environment:
-      - DATABASE_URL=postgresql://invoice_user:invoice_pass@postgres:5432/invoices
+      # Same asyncpg driver as the API — the task wraps its own async
+      # session around the shared async engine.
+      - DATABASE_URL=postgresql+asyncpg://invoice_user:invoice_pass@postgres:5432/invoices
       - REDIS_URL=redis://redis:6379
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_COLLECTION=invoices
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - EXTRACTOR_STRATEGY=${EXTRACTOR_STRATEGY:-openai}
+      - OCR_LANGUAGES=${OCR_LANGUAGES:-pol+eng}
     depends_on:
       postgres:
         condition: service_healthy

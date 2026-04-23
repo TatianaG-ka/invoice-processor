@@ -9,10 +9,9 @@ Extracts plain text from PDF bytes using a hybrid strategy:
    pdfplumber yields empty text, which signals a scanned / image-only
    PDF.
 
-In Phase 1 the OCR fallback is a stub that raises ``NotImplementedError``.
-Phase 5 swaps the stub body for a real implementation — the interface
-above (same signature, ``bytes -> str``) is locked in now so Phase 5 is
-a one-function swap, not a refactor.
+Phase 5 swapped the Phase 1 ``NotImplementedError`` stub for the real
+OCR path. The public signature (``bytes -> str``) is unchanged so the
+swap was a no-op for callers.
 """
 
 from __future__ import annotations
@@ -20,9 +19,18 @@ from __future__ import annotations
 import io
 import logging
 
+import pdf2image
 import pdfplumber
+import pytesseract
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# DPI for the PDF→image rasterisation step. 200 DPI is the common
+# tesseract sweet spot — below ~150 DPI accuracy drops sharply on small
+# fonts; above ~300 DPI the per-page cost grows without extra signal.
+_OCR_RASTER_DPI = 200
 
 
 def extract_text(pdf_bytes: bytes) -> str:
@@ -52,10 +60,7 @@ def extract_text(pdf_bytes: bytes) -> str:
     if text:
         return text
 
-    logger.info(
-        "pdfplumber returned empty text; falling back to OCR "
-        "(stub in Phase 1, real impl in Phase 5)"
-    )
+    logger.info("pdfplumber returned empty text; falling back to OCR")
     return _ocr_fallback(pdf_bytes)
 
 
@@ -83,19 +88,51 @@ def _extract_with_pdfplumber(pdf_bytes: bytes) -> str:
     return "\n\n".join(pages_text).strip()
 
 
-def _ocr_fallback(pdf_bytes: bytes) -> str:  # noqa: ARG001
-    """OCR fallback for scanned / image-only PDFs.
+def _ocr_fallback(pdf_bytes: bytes) -> str:
+    """OCR-based text extraction for scanned / image-only PDFs.
 
-    Phase 1: stub that raises ``NotImplementedError``. The concrete
-    implementation lands in Phase 5 and will use ``pytesseract`` +
-    ``pdf2image`` (with ``OCR_LANGUAGES='pol+eng'`` from settings).
-    The signature above keeps Phase 5 a one-function swap.
+    Steps:
+        1. Rasterise each PDF page to an image via ``pdf2image``
+           (which shells out to ``poppler`` / ``pdftoppm``).
+        2. Run ``pytesseract`` per page with the configured
+           languages (``settings.OCR_LANGUAGES``, defaults to
+           ``"pol+eng"``).
+        3. Concatenate page texts with a blank-line separator.
+
+    Args:
+        pdf_bytes: Raw PDF bytes.
+
+    Returns:
+        Extracted text, stripped.
 
     Raises:
-        NotImplementedError: Always, until Phase 5 swaps the body.
+        ValueError: If the PDF cannot be rasterised at all (corrupt
+            bytes that survived pdfplumber but fail poppler).
+        RuntimeError: If tesseract is not installed / not on PATH.
+            Surfaced as-is so deploy-time misconfiguration is loud.
     """
-    raise NotImplementedError(
-        "OCR fallback not yet implemented. This path is reached when "
-        "pdfplumber cannot extract text (scanned/image-only PDFs). "
-        "Implementation target: Phase 5 (pytesseract + pdf2image)."
-    )
+    try:
+        images = pdf2image.convert_from_bytes(pdf_bytes, dpi=_OCR_RASTER_DPI)
+    except pdf2image.exceptions.PDFPageCountError as exc:
+        raise ValueError(f"Cannot rasterise PDF for OCR: {exc!r}") from exc
+
+    if not images:
+        raise ValueError("PDF rasterised to zero pages; nothing to OCR")
+
+    languages = settings.OCR_LANGUAGES
+    pages_text: list[str] = []
+    for page_no, img in enumerate(images, start=1):
+        try:
+            page_text = pytesseract.image_to_string(img, lang=languages)
+        except pytesseract.TesseractNotFoundError as exc:
+            # Deploy-time misconfiguration — don't swallow as ValueError,
+            # a healthy runtime should always have tesseract on PATH.
+            raise RuntimeError(
+                "tesseract binary not found on PATH; install "
+                "`tesseract-ocr` (+ language packs per settings.OCR_LANGUAGES) "
+                "or check the Dockerfile."
+            ) from exc
+        pages_text.append(page_text.strip())
+        logger.debug("OCR page %d/%d produced %d chars", page_no, len(images), len(page_text))
+
+    return "\n\n".join(p for p in pages_text if p).strip()

@@ -17,13 +17,26 @@ the usual relational concessions:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import JSON, Date, DateTime, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+
+def _utcnow() -> datetime:
+    """Python-side UTC timestamp for ``updated_at`` triggers.
+
+    ``onupdate=func.now()`` works on Postgres (server-side) but SQLite has
+    no native ``ON UPDATE`` DDL, so the trigger is silently dropped and
+    the column stays pinned to the insert timestamp. A Python-side
+    callable fires for every UPDATE regardless of backend, which is the
+    behaviour every downstream flow (Phase 5 queue status writes,
+    Phase 7 re-ingestion) actually expects.
+    """
+    return datetime.now(UTC)
 
 
 class Invoice(Base):
@@ -60,7 +73,7 @@ class Invoice(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        onupdate=func.now(),
+        onupdate=_utcnow,
         nullable=False,
     )
 

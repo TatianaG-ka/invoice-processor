@@ -1,12 +1,18 @@
 """End-to-end persistence tests for the invoice endpoints.
 
-These tests walk the full HTTP stack:
+Post-Phase-5, the PDF upload path is async:
 
-    POST /invoices (PDF upload, mock extractor) → DB row → GET /invoices/{id}
+    POST /invoices (PDF)  →  202 {job_id}
+    GET  /invoices/jobs/{job_id}  →  finished + invoice_id
+    GET  /invoices/{invoice_id}   →  stored record
+
+These tests walk the full HTTP stack and rely on the synchronous queue
+fixture in ``conftest.py`` so the job finishes inline — there is no
+worker process during tests.
 
 The ``force_mock_extractor`` fixture keeps the LLM out of the loop, so
-the only moving pieces exercised here are the FastAPI routes, the
-:class:`InvoiceRepository`, and the async SQLAlchemy layer.
+the only moving pieces exercised here are the FastAPI routes, the RQ
+wiring, the :class:`InvoiceRepository`, and the async SQLAlchemy layer.
 """
 
 from __future__ import annotations
@@ -23,35 +29,36 @@ def force_mock_extractor(monkeypatch):
     monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
 
 
-def test_post_invoice_returns_id_and_created_at(client: TestClient, faktura_01_bytes: bytes):
-    response = client.post(
-        "/invoices",
-        files={"file": ("faktura_01.pdf", faktura_01_bytes, "application/pdf")},
-    )
-    assert response.status_code == 201
-    body = response.json()
+def _post_and_wait_for_invoice_id(client: TestClient, pdf_bytes: bytes) -> int:
+    """POST a PDF, fetch the job, return the invoice_id.
 
-    assert isinstance(body.get("id"), int)
-    assert body["id"] > 0
-    assert "created_at" in body
-    assert body["created_at"]  # non-empty ISO timestamp
-
-
-def test_post_then_get_roundtrip_returns_same_invoice(client: TestClient, faktura_01_bytes: bytes):
+    Helper for the round-trip tests. Sync queue mode means the job
+    finishes inside ``enqueue``, so the status check is deterministic
+    without polling.
+    """
     post = client.post(
         "/invoices",
-        files={"file": ("faktura_01.pdf", faktura_01_bytes, "application/pdf")},
+        files={"file": ("faktura.pdf", pdf_bytes, "application/pdf")},
     )
-    assert post.status_code == 201
-    invoice_id = post.json()["id"]
+    assert post.status_code == 202
+    status = client.get(f"/invoices/jobs/{post.json()['job_id']}").json()
+    assert status["status"] == "finished", status
+    assert isinstance(status["invoice_id"], int)
+    return status["invoice_id"]
+
+
+def test_post_then_get_roundtrip_returns_stored_invoice(
+    client: TestClient, faktura_01_bytes: bytes
+):
+    invoice_id = _post_and_wait_for_invoice_id(client, faktura_01_bytes)
 
     got = client.get(f"/invoices/{invoice_id}")
     assert got.status_code == 200
     body = got.json()
 
     assert body["id"] == invoice_id
-    assert body["seller"]["name"] == post.json()["seller"]["name"]
-    assert body["totals"]["currency"] == post.json()["totals"]["currency"]
+    assert "created_at" in body and body["created_at"]
+    assert body["totals"]["currency"] in {"PLN", "EUR", "USD"}
 
 
 def test_get_invoice_missing_returns_404(client: TestClient):
@@ -62,29 +69,20 @@ def test_get_invoice_missing_returns_404(client: TestClient):
 
 def test_each_post_creates_a_new_row(client: TestClient, faktura_01_bytes: bytes):
     """Two uploads → two distinct DB IDs."""
-    first = client.post(
-        "/invoices",
-        files={"file": ("a.pdf", faktura_01_bytes, "application/pdf")},
-    )
-    second = client.post(
-        "/invoices",
-        files={"file": ("b.pdf", faktura_01_bytes, "application/pdf")},
-    )
-    assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["id"] != second.json()["id"]
+    first = _post_and_wait_for_invoice_id(client, faktura_01_bytes)
+    second = _post_and_wait_for_invoice_id(client, faktura_01_bytes)
+    assert first != second
 
 
-def test_post_invoice_body_preserves_extracted_schema(client: TestClient, faktura_01_bytes: bytes):
-    """Adding ``id`` + ``created_at`` does not break the Phase 2 shape."""
-    response = client.post(
-        "/invoices",
-        files={"file": ("faktura_01.pdf", faktura_01_bytes, "application/pdf")},
-    )
-    assert response.status_code == 201
-    body = response.json()
+def test_stored_invoice_preserves_extracted_schema(client: TestClient, faktura_01_bytes: bytes):
+    """The persisted record still carries the Phase 2 shape.
 
-    # Superset — id/created_at add to, not replace, the extracted shape.
+    ``id`` + ``created_at`` add to the extracted shape without
+    displacing any Phase 2 field.
+    """
+    invoice_id = _post_and_wait_for_invoice_id(client, faktura_01_bytes)
+    body = client.get(f"/invoices/{invoice_id}").json()
+
     assert set(body.keys()) >= {
         "id",
         "created_at",

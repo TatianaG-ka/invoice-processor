@@ -7,6 +7,14 @@ Phase 3 addition: every test runs against an in-memory
 schema per test and overrides the FastAPI ``get_db`` dependency so the
 ``client`` TestClient sees the test DB rather than the real Postgres
 URL configured in ``settings``.
+
+Phase 5 addition: every test also gets a fakeredis-backed RQ queue
+running in synchronous mode (``is_async=False``). Enqueued jobs
+execute inline inside the route handler so the endpoint tests observe
+a realistic 202 → finished lifecycle without running a worker
+process. The same autouse fixture retargets
+:func:`app.db.base.get_sessionmaker` at the in-memory test engine so
+the task function's ``asyncio.run`` pipeline hits the test DB too.
 """
 
 from __future__ import annotations
@@ -14,10 +22,12 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+import fakeredis
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from rq import Queue
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -25,9 +35,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.db import base as db_base
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.queue import connection as queue_connection
+from app.queue.connection import queue_dependency
 
 # ---------------------------------------------------------------------------
 # Async DB fixtures — in-memory SQLite per test.
@@ -71,12 +84,22 @@ async def db_session(test_session_factory) -> AsyncGenerator[AsyncSession, None]
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _override_get_db(test_session_factory):
-    """Route every ``Depends(get_db)`` at the test engine.
+async def _override_get_db(test_session_factory, test_engine, monkeypatch):
+    """Route every database access at the test engine.
 
-    Autouse, so even tests that never touch the DB directly still
-    exercise the overridden dependency — no test accidentally opens a
-    connection to the real Postgres URL from ``settings``.
+    Two layers of override are needed:
+
+    1. ``app.dependency_overrides[get_db]`` — the FastAPI-level hook
+       used by async routes (``GET /invoices/{id}``, KSeF upload).
+    2. ``app.db.base._sessionmaker`` / ``_engine`` — the module-level
+       singletons used by the queue task function
+       (:func:`app.queue.tasks.process_pdf_invoice`), which runs
+       outside FastAPI's DI and calls
+       :func:`app.db.base.get_sessionmaker` directly.
+
+    Autouse so every test gets both overrides regardless of whether
+    it touches the DB — defence in depth against accidental real-
+    Postgres connections.
     """
 
     async def _get_test_db() -> AsyncGenerator[AsyncSession, None]:
@@ -84,10 +107,64 @@ async def _override_get_db(test_session_factory):
             yield session
 
     app.dependency_overrides[get_db] = _get_test_db
+    # Prime the lazy singletons so queue tasks share the test DB.
+    monkeypatch.setattr(db_base, "_engine", test_engine)
+    monkeypatch.setattr(db_base, "_sessionmaker", test_session_factory)
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# Queue fixtures — fakeredis + synchronous RQ queue (Phase 5).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_redis() -> fakeredis.FakeStrictRedis:
+    """Per-test fakeredis connection.
+
+    Each test gets its own isolated instance so job ids from one
+    test never leak into another.
+    """
+    return fakeredis.FakeStrictRedis()
+
+
+@pytest.fixture
+def test_queue(fake_redis: fakeredis.FakeStrictRedis) -> Queue:
+    """Synchronous RQ queue backed by fakeredis.
+
+    ``is_async=False`` means ``queue.enqueue(...)`` executes the job
+    inline and the returned :class:`~rq.job.Job` is already finished
+    (or failed) by the time the enqueue call returns. No worker
+    process needed.
+    """
+    return Queue("default", connection=fake_redis, is_async=False)
+
+
+@pytest.fixture(autouse=True)
+def _override_queue(test_queue: Queue, monkeypatch):
+    """Wire the test queue into every FastAPI queue lookup.
+
+    Overrides both:
+
+    * the FastAPI dependency (``queue_dependency``) — used by
+      ``POST /invoices`` and ``GET /invoices/jobs/{id}`` routes;
+    * the module-level singletons in :mod:`app.queue.connection` —
+      anything else that resolves the queue without going through
+      the dependency (currently nothing, but cheap insurance).
+
+    Autouse so no test can accidentally hit real Redis via
+    ``settings.REDIS_URL``.
+    """
+    app.dependency_overrides[queue_dependency] = lambda: test_queue
+    monkeypatch.setattr(queue_connection, "_redis_client", test_queue.connection)
+    monkeypatch.setattr(queue_connection, "_queue", test_queue)
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(queue_dependency, None)
 
 
 # ---------------------------------------------------------------------------
