@@ -100,7 +100,9 @@ class TestVectorStoreBasics:
 
 class TestHelpers:
     def test_build_invoice_text_joins_seller_and_descriptions(self):
-        invoice = _make_invoice("Tesla Sp. z o.o.", ["Model Y konfiguracja", "Opłata rejestracyjna"])
+        invoice = _make_invoice(
+            "Tesla Sp. z o.o.", ["Model Y konfiguracja", "Opłata rejestracyjna"]
+        )
         text = build_invoice_text(invoice)
         assert "Tesla Sp. z o.o." in text
         assert "Model Y konfiguracja" in text
@@ -122,13 +124,9 @@ class TestHelpers:
 
 
 class TestIndexInvoice:
-    def test_success_returns_true_and_point_is_searchable(
-        self, test_vector_store: VectorStore
-    ):
+    def test_success_returns_true_and_point_is_searchable(self, test_vector_store: VectorStore):
         invoice = _make_invoice("Drukarnia XYZ", ["Toner HP LaserJet"])
-        assert index_invoice(
-            invoice_id=55, extracted=invoice, store=test_vector_store
-        ) is True
+        assert index_invoice(invoice_id=55, extracted=invoice, store=test_vector_store) is True
 
         # Round-trip: searching the same text returns the point.
         from app.services import embedder
@@ -137,20 +135,14 @@ class TestIndexInvoice:
         hits = test_vector_store.search(query_vec, limit=10)
         assert hits[0][0] == 55
 
-    def test_empty_text_is_skipped_not_raised(
-        self, test_vector_store: VectorStore
-    ):
+    def test_empty_text_is_skipped_not_raised(self, test_vector_store: VectorStore):
         """An invoice with no seller name AND no line items has nothing to embed."""
         invoice = ExtractedInvoice(
             seller=Party(name=""),
             buyer=Party(name="Buyer"),
-            totals=Totals(
-                net=Decimal("0"), vat=Decimal("0"), gross=Decimal("0")
-            ),
+            totals=Totals(net=Decimal("0"), vat=Decimal("0"), gross=Decimal("0")),
         )
-        assert index_invoice(
-            invoice_id=1, extracted=invoice, store=test_vector_store
-        ) is False
+        assert index_invoice(invoice_id=1, extracted=invoice, store=test_vector_store) is False
 
     def test_failure_is_swallowed_and_returns_false(self, monkeypatch):
         """Broken store must not propagate — save path has to stay green."""
@@ -160,6 +152,4 @@ class TestIndexInvoice:
             def upsert(self, *args, **kwargs):
                 raise RuntimeError("qdrant unreachable")
 
-        assert index_invoice(
-            invoice_id=9, extracted=invoice, store=BrokenStore()
-        ) is False
+        assert index_invoice(invoice_id=9, extracted=invoice, store=BrokenStore()) is False

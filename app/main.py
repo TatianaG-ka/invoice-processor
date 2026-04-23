@@ -234,9 +234,7 @@ async def search_invoices(
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query 'q' must not be empty.")
     if limit < 1 or limit > 100:
-        raise HTTPException(
-            status_code=400, detail="'limit' must be between 1 and 100."
-        )
+        raise HTTPException(status_code=400, detail="'limit' must be between 1 and 100.")
 
     query_vector = await asyncio.to_thread(embedder.embed, q)
     hits = await asyncio.to_thread(store.search, query_vector, limit)

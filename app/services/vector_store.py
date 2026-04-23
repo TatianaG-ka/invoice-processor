@@ -185,9 +185,7 @@ def index_invoice(
         actual_store = store or get_store()
         text = build_invoice_text(extracted)
         if not text:
-            logger.warning(
-                "Invoice id=%d has no embeddable text; skipping index", invoice_id
-            )
+            logger.warning("Invoice id=%d has no embeddable text; skipping index", invoice_id)
             return False
         vector = embedder.embed(text)
         payload = build_invoice_payload(invoice_id, extracted)

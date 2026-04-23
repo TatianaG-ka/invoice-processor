@@ -42,9 +42,7 @@ def _upload_ksef(client: TestClient, xml_bytes: bytes, filename: str = "f.xml") 
 # ---------------------------------------------------------------------------
 
 
-def test_search_returns_recently_saved_invoice(
-    client: TestClient, ksef_fa2_bytes: bytes
-):
+def test_search_returns_recently_saved_invoice(client: TestClient, ksef_fa2_bytes: bytes):
     """Upload → search for its seller name → top hit is that invoice."""
     invoice_id = _upload_ksef(client, ksef_fa2_bytes)
 
@@ -64,9 +62,7 @@ def test_search_returns_recently_saved_invoice(
     assert isinstance(top["score"], float)
 
 
-def test_search_result_includes_full_invoice(
-    client: TestClient, ksef_fa2_bytes: bytes
-):
+def test_search_result_includes_full_invoice(client: TestClient, ksef_fa2_bytes: bytes):
     """Payload must hydrate the whole StoredInvoice, not just metadata."""
     _upload_ksef(client, ksef_fa2_bytes)
 
@@ -92,9 +88,7 @@ def test_search_respects_limit(client: TestClient, ksef_fa2_bytes: bytes, ksef_f
     _upload_ksef(client, ksef_fa2_bytes, filename="fa2.xml")
     _upload_ksef(client, ksef_fa3_bytes, filename="fa3.xml")
 
-    response = client.get(
-        "/invoices/search", params={"q": "Acme Sp. z o.o.", "limit": 1}
-    )
+    response = client.get("/invoices/search", params={"q": "Acme Sp. z o.o.", "limit": 1})
     assert response.status_code == 200
     assert len(response.json()["results"]) == 1
 
@@ -118,15 +112,11 @@ def test_search_without_query_param_returns_422(client: TestClient):
 
 @pytest.mark.parametrize("limit", [0, -1, 101, 500])
 def test_search_with_out_of_range_limit_returns_400(client: TestClient, limit: int):
-    response = client.get(
-        "/invoices/search", params={"q": "anything", "limit": limit}
-    )
+    response = client.get("/invoices/search", params={"q": "anything", "limit": limit})
     assert response.status_code == 400
 
 
-def test_search_route_takes_precedence_over_invoice_id(
-    client: TestClient, ksef_fa2_bytes: bytes
-):
+def test_search_route_takes_precedence_over_invoice_id(client: TestClient, ksef_fa2_bytes: bytes):
     """``/invoices/search`` must NOT be parsed as ``/invoices/{invoice_id}``.
 
     Regression guard: if the route order flips, the search endpoint
