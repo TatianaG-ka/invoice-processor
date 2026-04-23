@@ -26,6 +26,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import create_all
@@ -202,7 +203,10 @@ async def upload_ksef_invoice(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     repo = InvoiceRepository(session)
-    saved = await repo.save(invoice)
+    try:
+        saved = await repo.save(invoice)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
     # Best-effort indexing: a Qdrant outage must not block a successful
     # parse + persist. Same contract as the PDF/queue path.
     index_invoice(saved.id, invoice)
@@ -244,14 +248,17 @@ async def search_invoices(
 
     repo = InvoiceRepository(session)
     results: list[SearchHit] = []
-    for invoice_id, score in hits:
-        row = await repo.get_by_id(invoice_id)
-        if row is None:
-            # Qdrant can out-live the DB record in edge cases (manual
-            # row delete, restore from backup). Skip silently rather
-            # than 500 — the user's result list just gets shorter.
-            continue
-        results.append(SearchHit(score=score, invoice=orm_to_stored_invoice(row)))
+    try:
+        for invoice_id, score in hits:
+            row = await repo.get_by_id(invoice_id)
+            if row is None:
+                # Qdrant can out-live the DB record in edge cases (manual
+                # row delete, restore from backup). Skip silently rather
+                # than 500 — the user's result list just gets shorter.
+                continue
+            results.append(SearchHit(score=score, invoice=orm_to_stored_invoice(row)))
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
 
     return SearchResponse(query=q, results=results)
 
@@ -267,7 +274,10 @@ async def get_invoice(
 ) -> StoredInvoice:
     """Return the stored invoice with the given primary key."""
     repo = InvoiceRepository(session)
-    row = await repo.get_by_id(invoice_id)
+    try:
+        row = await repo.get_by_id(invoice_id)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
     if row is None:
         raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found")
     return orm_to_stored_invoice(row)
