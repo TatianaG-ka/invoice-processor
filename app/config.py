@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
 
     # --- Database ---
-    DATABASE_URL: str = "postgresql://invoice_user:invoice_pass@localhost:5432/invoices"
+    # Default points at an async Postgres (asyncpg driver). Tests swap
+    # this for ``sqlite+aiosqlite:///:memory:`` via conftest.
+    DATABASE_URL: str = "postgresql+asyncpg://invoice_user:invoice_pass@localhost:5432/invoices"
 
     # --- Redis (od tygodnia 2) ---
     REDIS_URL: str = "redis://localhost:6379"

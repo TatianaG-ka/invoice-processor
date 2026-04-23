@@ -1,12 +1,16 @@
 """FastAPI entrypoint for the invoice-processor service.
 
-The POST ``/invoices`` endpoint runs the full Phase 2 pipeline:
+The POST ``/invoices`` endpoint runs the full Phase 2 + Phase 3
+pipeline:
 
 1. Validate content-type and size.
 2. Extract plain text from the PDF (``pdf_text_extractor``).
 3. Run structured extraction over that text (``invoice_extractor``).
-4. Return a JSON payload matching
-   :class:`app.schemas.invoice.ExtractedInvoice`.
+4. Persist the extracted invoice to the database.
+5. Return a JSON payload matching
+   :class:`app.schemas.invoice.StoredInvoice`.
+
+``GET /invoices/{id}`` fetches a previously-stored invoice.
 
 Image uploads (JPG/PNG) are deferred to Phase 5, which adds the OCR
 leg and the async queue. For now they respond with 415.
@@ -14,13 +18,26 @@ leg and the async queue. For now they respond with 415.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.invoice import ExtractedInvoice
+from app.db.base import create_all
+from app.db.repositories.invoice_repository import InvoiceRepository
+from app.db.session import get_db
+from app.schemas.invoice import StoredInvoice, stored_from_orm
 from app.services.invoice_extractor import InvoiceExtractionError, extract_invoice
 from app.services.pdf_text_extractor import extract_text
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create tables on startup; no shutdown work beyond engine disposal."""
+    await create_all()
+    yield
+
 
 app = FastAPI(
     title="Invoice Processor API",
@@ -28,7 +45,8 @@ app = FastAPI(
         "Automatic invoice processing: PDF → OCR → AI extraction → "
         "database entry + semantic search."
     ),
-    version="0.2.0",
+    version="0.3.0",
+    lifespan=lifespan,
 )
 
 # Phase 2 accepts PDF only. image/jpeg and image/png re-open once the
@@ -52,13 +70,14 @@ def health_check():
 @app.post(
     "/invoices",
     status_code=201,
-    response_model=ExtractedInvoice,
+    response_model=StoredInvoice,
     tags=["Invoices"],
 )
 async def upload_invoice(
     file: Annotated[UploadFile, File()],
-) -> ExtractedInvoice:
-    """Accept a PDF invoice and return structured extracted data."""
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StoredInvoice:
+    """Accept a PDF invoice, persist it, return the stored record."""
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=415,
@@ -97,7 +116,26 @@ async def upload_invoice(
             detail=f"Upstream extraction failed: {exc}",
         ) from exc
 
-    return invoice
+    repo = InvoiceRepository(session)
+    saved = await repo.save(invoice)
+    return stored_from_orm(saved)
+
+
+@app.get(
+    "/invoices/{invoice_id}",
+    response_model=StoredInvoice,
+    tags=["Invoices"],
+)
+async def get_invoice(
+    invoice_id: int,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StoredInvoice:
+    """Return the stored invoice with the given primary key."""
+    repo = InvoiceRepository(session)
+    row = await repo.get_by_id(invoice_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found")
+    return stored_from_orm(row)
 
 
 if __name__ == "__main__":

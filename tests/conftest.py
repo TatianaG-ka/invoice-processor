@@ -1,20 +1,117 @@
 """Pytest fixtures - reużywalne obiekty dla testów.
 
 Importowane automatycznie przez pytest w każdym pliku testowym.
+
+Phase 3 addition: every test runs against an in-memory
+``sqlite+aiosqlite`` database. The shared fixture creates/destroys the
+schema per test and overrides the FastAPI ``get_db`` dependency so the
+``client`` TestClient sees the test DB rather than the real Postgres
+URL configured in ``settings``.
 """
 
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import StaticPool
 
+from app.db.base import Base
+from app.db.session import get_db
 from app.main import app
+
+# ---------------------------------------------------------------------------
+# Async DB fixtures — in-memory SQLite per test.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def test_engine():
+    """Create a fresh in-memory SQLite engine per test.
+
+    ``StaticPool`` keeps the same in-memory database across connections
+    opened within this engine — otherwise every new connection would
+    see an empty DB, which breaks any flow that opens >1 connection
+    (FastAPI + the repository).
+    """
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        yield engine
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def test_session_factory(test_engine) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def db_session(test_session_factory) -> AsyncGenerator[AsyncSession, None]:
+    """An :class:`AsyncSession` for repository-level tests."""
+    async with test_session_factory() as session:
+        yield session
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _override_get_db(test_session_factory):
+    """Route every ``Depends(get_db)`` at the test engine.
+
+    Autouse, so even tests that never touch the DB directly still
+    exercise the overridden dependency — no test accidentally opens a
+    connection to the real Postgres URL from ``settings``.
+    """
+
+    async def _get_test_db() -> AsyncGenerator[AsyncSession, None]:
+        async with test_session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _get_test_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# HTTP clients.
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def client() -> TestClient:
-    """TestClient dla endpointów FastAPI."""
+    """TestClient dla endpointów FastAPI (synchronous)."""
     return TestClient(app)
+
+
+@pytest_asyncio.fixture
+async def async_client() -> AsyncGenerator[AsyncClient, None]:
+    """httpx.AsyncClient against the ASGI app (for async tests)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+# ---------------------------------------------------------------------------
+# PDF fixtures (Phase 1).
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

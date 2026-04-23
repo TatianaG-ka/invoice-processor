@@ -19,7 +19,7 @@ materialise a strongly-typed domain model.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
@@ -147,6 +147,48 @@ class LLMInvoiceResponse(BaseModel):
     buyer: _LLMParty
     line_items: list[_LLMLineItem]
     totals: _LLMTotals
+
+
+class StoredInvoice(ExtractedInvoice):
+    """Response model for persisted invoices.
+
+    Extends :class:`ExtractedInvoice` with the DB-assigned ``id`` and
+    ``created_at`` timestamp so clients can reference the row in
+    subsequent calls (GET /invoices/{id}).
+    """
+
+    model_config = ConfigDict(
+        json_encoders={Decimal: lambda v: float(v)},
+        from_attributes=True,
+    )
+
+    id: int
+    created_at: datetime
+
+
+def stored_from_orm(row) -> StoredInvoice:
+    """Build a :class:`StoredInvoice` from an :class:`~app.db.models.Invoice`.
+
+    Kept outside the schema module's import graph to avoid a cyclical
+    dependency: ``app.db.models`` imports the ORM base, which imports
+    nothing schema-related. The inverse mapping (schema → ORM) lives
+    in the repository.
+    """
+    return StoredInvoice(
+        id=row.id,
+        created_at=row.created_at,
+        invoice_number=row.invoice_number,
+        issue_date=row.issue_date,
+        seller=Party(name=row.seller_name, nip=row.seller_nip, address=row.seller_address),
+        buyer=Party(name=row.buyer_name, nip=row.buyer_nip, address=row.buyer_address),
+        line_items=[LineItem(**item) for item in (row.line_items or [])],
+        totals=Totals(
+            net=row.total_net,
+            vat=row.total_vat,
+            gross=row.total_gross,
+            currency=row.currency,
+        ),
+    )
 
 
 def from_llm_response(payload: LLMInvoiceResponse) -> ExtractedInvoice:

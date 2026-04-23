@@ -24,6 +24,7 @@ openai==1.51.0
 sqlalchemy==2.0.35
 asyncpg==0.30.0        # async Postgres driver (replaces psycopg2-binary)
 aiosqlite==0.20.0      # async SQLite for in-memory test DB
+greenlet==3.4.0        # required by SQLAlchemy async on CPython 3.13 Windows
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
 
