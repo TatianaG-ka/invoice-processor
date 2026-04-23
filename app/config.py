@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        # Dev machines often share a single .env across many projects
+        # (e.g. HUGGINGFACE_TOKEN, LANGCHAIN_API_KEY). Ignore anything
+        # the invoice-processor doesn't declare rather than crash.
+        extra="ignore",
     )
 
 
