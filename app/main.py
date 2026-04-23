@@ -1,19 +1,15 @@
 """FastAPI entrypoint for the invoice-processor service.
 
-The POST ``/invoices`` endpoint runs the full Phase 2 + Phase 3
-pipeline:
+Two ingestion routes land invoices in the database:
 
-1. Validate content-type and size.
-2. Extract plain text from the PDF (``pdf_text_extractor``).
-3. Run structured extraction over that text (``invoice_extractor``).
-4. Persist the extracted invoice to the database.
-5. Return a JSON payload matching
-   :class:`app.schemas.invoice.StoredInvoice`.
+* ``POST /invoices`` — PDF upload; text extraction (pdfplumber) →
+  LLM structured extraction → persist (Phase 2 + Phase 3).
+* ``POST /invoices/ksef`` — KSeF XML upload; deterministic XML parse
+  (dual FA(2)/FA(3) schema) → persist (Phase 4).
 
-``GET /invoices/{id}`` fetches a previously-stored invoice.
-
-Image uploads (JPG/PNG) are deferred to Phase 5, which adds the OCR
-leg and the async queue. For now they respond with 415.
+``GET /invoices/{id}`` fetches a previously-stored invoice regardless
+of its ingestion path. Image uploads (JPG/PNG) are deferred to
+Phase 5 (OCR fallback + async queue).
 """
 
 from __future__ import annotations
@@ -32,6 +28,7 @@ from app.db.repositories.invoice_repository import (
 from app.db.session import get_db
 from app.schemas.invoice import StoredInvoice
 from app.services.invoice_extractor import InvoiceExtractionError, extract_invoice
+from app.services.ksef_parser import KSeFParseError, parse_ksef
 from app.services.pdf_text_extractor import extract_text
 
 
@@ -52,9 +49,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Phase 2 accepts PDF only. image/jpeg and image/png re-open once the
-# OCR fallback and queue land in Phase 5.
+# Phase 2 accepts PDF only on POST /invoices. image/jpeg and image/png
+# re-open once the OCR fallback and queue land in Phase 5.
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
+# Phase 4 accepts XML on POST /invoices/ksef. ``text/xml`` is the
+# legacy MIME type still emitted by some tooling; both are valid.
+KSEF_CONTENT_TYPES = {"application/xml", "text/xml"}
 MAX_UPLOAD_SIZE_MB = 10
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
@@ -118,6 +118,43 @@ async def upload_invoice(
             status_code=502,
             detail=f"Upstream extraction failed: {exc}",
         ) from exc
+
+    repo = InvoiceRepository(session)
+    saved = await repo.save(invoice)
+    return orm_to_stored_invoice(saved)
+
+
+@app.post(
+    "/invoices/ksef",
+    status_code=201,
+    response_model=StoredInvoice,
+    tags=["Invoices"],
+)
+async def upload_ksef_invoice(
+    file: Annotated[UploadFile, File()],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StoredInvoice:
+    """Accept a KSeF XML invoice (FA(2) or FA(3)), persist, return stored."""
+    if file.content_type not in KSEF_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Unsupported file type: {file.content_type}. "
+                f"Accepted: {', '.join(sorted(KSEF_CONTENT_TYPES))}."
+            ),
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {len(contents) / 1024:.1f}KB > {MAX_UPLOAD_SIZE_MB}MB",
+        )
+
+    try:
+        invoice = parse_ksef(contents)
+    except KSeFParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     repo = InvoiceRepository(session)
     saved = await repo.save(invoice)

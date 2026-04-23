@@ -20,6 +20,9 @@ pdf2image==1.17.0
 Pillow==11.0.0
 openai==1.51.0
 
+# --- Phase 4: KSeF XML parser (dual FA(2)/FA(3) schemas) ---
+lxml==5.3.0            # XPath + namespace handling for KSeF
+
 # --- Phase 3: Database (async SQLAlchemy 2.0, no Alembic) ---
 sqlalchemy==2.0.35
 asyncpg==0.30.0        # async Postgres driver (replaces psycopg2-binary)

@@ -182,3 +182,23 @@ def all_faktury_bytes(request: pytest.FixtureRequest, fixtures_dir: Path) -> byt
 def sample_pdf_bytes(faktura_01_bytes: bytes) -> bytes:
     """Backward-compat alias dla pierwszej faktury."""
     return faktura_01_bytes
+
+
+# ---------------------------------------------------------------------------
+# KSeF XML fixtures (Phase 4).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ksef_dir(fixtures_dir: Path) -> Path:
+    return fixtures_dir / "ksef"
+
+
+@pytest.fixture
+def ksef_fa2_bytes(ksef_dir: Path) -> bytes:
+    return _load_fixture(ksef_dir, "faktura_fa2_sample.xml")
+
+
+@pytest.fixture
+def ksef_fa3_bytes(ksef_dir: Path) -> bytes:
+    return _load_fixture(ksef_dir, "faktura_fa3_sample.xml")
