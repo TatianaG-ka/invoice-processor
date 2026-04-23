@@ -18,6 +18,8 @@ reasons:
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -37,6 +39,41 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def _prepare_async_url(url: str) -> tuple[str, dict[str, Any]]:
+    """Normalise a ``DATABASE_URL`` for the asyncpg driver.
+
+    Managed Postgres providers (Neon, Supabase, RDS) hand out connection
+    strings in the psycopg2-friendly form
+
+        ``postgresql://user:pass@host/db?sslmode=require``
+
+    asyncpg needs two adjustments:
+
+    * The SQLAlchemy dialect prefix must be ``postgresql+asyncpg://`` —
+      the bare ``postgresql://`` would route through the default
+      (synchronous psycopg2) dialect and fail at engine startup.
+    * ``sslmode`` is a libpq parameter. asyncpg rejects it as unknown
+      in the query string, so we strip it and pass the equivalent
+      ``ssl="require"`` via ``connect_args`` — the canonical shape for
+      asyncpg + SQLAlchemy.
+
+    Users can paste their provider URL verbatim; the normalisation
+    happens here so no ``.env`` hand-editing is required.
+    """
+    connect_args: dict[str, Any] = {}
+
+    if "sslmode=require" in url:
+        connect_args["ssl"] = "require"
+        url = url.replace("?sslmode=require&", "?")
+        url = url.replace("&sslmode=require", "")
+        url = url.replace("?sslmode=require", "")
+
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://") :]
+
+    return url, connect_args
+
+
 def get_engine() -> AsyncEngine:
     """Return the lazily-constructed async engine.
 
@@ -45,7 +82,8 @@ def get_engine() -> AsyncEngine:
     """
     global _engine
     if _engine is None:
-        _engine = create_async_engine(settings.DATABASE_URL, echo=False, future=True)
+        url, connect_args = _prepare_async_url(settings.DATABASE_URL)
+        _engine = create_async_engine(url, echo=False, future=True, connect_args=connect_args)
     return _engine
 
 
