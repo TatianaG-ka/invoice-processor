@@ -19,6 +19,10 @@ the task function's ``asyncio.run`` pipeline hits the test DB too.
 
 from __future__ import annotations
 
+import hashlib
+import math
+import random
+import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -27,6 +31,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from qdrant_client import QdrantClient
 from rq import Queue
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -41,6 +46,10 @@ from app.db.session import get_db
 from app.main import app
 from app.queue import connection as queue_connection
 from app.queue.connection import queue_dependency
+from app.services import embedder as embedder_module
+from app.services import vector_store as vector_store_module
+from app.services.embedder import EMBEDDING_DIM
+from app.services.vector_store import VectorStore, vector_store_dependency
 
 # ---------------------------------------------------------------------------
 # Async DB fixtures — in-memory SQLite per test.
@@ -165,6 +174,73 @@ def _override_queue(test_queue: Queue, monkeypatch):
         yield
     finally:
         app.dependency_overrides.pop(queue_dependency, None)
+
+
+# ---------------------------------------------------------------------------
+# Vector search fixtures — in-memory Qdrant + deterministic fake embedder (Phase 6).
+# ---------------------------------------------------------------------------
+
+
+def fake_embed(text: str) -> list[float]:
+    """Deterministic 384-dim unit-length embedding for tests.
+
+    We never want CI to download the real ``all-MiniLM-L6-v2`` checkpoint
+    (~80 MB + torch on the hot path), so tests swap :func:`embedder.embed`
+    for this: same text → same vector, different text → (almost
+    certainly) different vector. Output is unit-length so cosine
+    similarity with Qdrant behaves sensibly.
+
+    Not remotely "semantic" — so tests assert match-by-identity
+    (upsert text X, search text X → X is top hit), not cross-text
+    similarity ranking.
+    """
+    seed = int.from_bytes(hashlib.md5(text.encode("utf-8")).digest()[:8], "little")
+    rng = random.Random(seed)
+    vec = [rng.uniform(-1.0, 1.0) for _ in range(EMBEDDING_DIM)]
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [v / norm for v in vec]
+
+
+@pytest.fixture
+def test_vector_store() -> VectorStore:
+    """Per-test in-memory Qdrant store.
+
+    ``QdrantClient(":memory:")`` uses qdrant-client's local in-process
+    backend — no network, no server. A unique collection name per test
+    prevents state leakage between tests even if the fixture somehow
+    gets reused (defensive; with per-test fixtures this is belt+braces).
+    """
+    client = QdrantClient(":memory:")
+    collection = f"test-invoices-{uuid.uuid4().hex[:8]}"
+    store = VectorStore(client=client, collection=collection)
+    store.ensure_collection()
+    return store
+
+
+@pytest.fixture(autouse=True)
+def _override_vector_store(test_vector_store: VectorStore, monkeypatch):
+    """Wire the test vector store + fake embedder into every call site.
+
+    Three layers of override mirror the Phase 5 queue pattern:
+
+    1. ``app.dependency_overrides[vector_store_dependency]`` — FastAPI
+       DI for ``GET /invoices/search``.
+    2. Module-level singletons in :mod:`app.services.vector_store`
+       (``_store`` / ``_client``) — used by :func:`index_invoice`
+       when called from the queue task (no DI) or the KSeF route
+       (DI, but the helper resolves the store itself).
+    3. ``embedder_module.embed`` — replaced with :func:`fake_embed`
+       so no test ever loads the real transformer checkpoint.
+       Autouse so every test is hermetic by default.
+    """
+    app.dependency_overrides[vector_store_dependency] = lambda: test_vector_store
+    monkeypatch.setattr(vector_store_module, "_store", test_vector_store)
+    monkeypatch.setattr(vector_store_module, "_client", test_vector_store._client)
+    monkeypatch.setattr(embedder_module, "embed", fake_embed)
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(vector_store_dependency, None)
 
 
 # ---------------------------------------------------------------------------

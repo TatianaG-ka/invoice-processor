@@ -167,6 +167,30 @@ class StoredInvoice(ExtractedInvoice):
     created_at: datetime
 
 
+class SearchHit(BaseModel):
+    """One entry in a semantic-search response.
+
+    The full invoice ships alongside the similarity score so a client
+    renders results in one round-trip without a second ``GET
+    /invoices/{id}`` per hit.
+    """
+
+    score: float
+    invoice: StoredInvoice
+
+
+class SearchResponse(BaseModel):
+    """Semantic search response wrapper.
+
+    Envelopes the hit list under a ``results`` key so we can add
+    metadata (total hits, query echo, pagination cursor) later without
+    a breaking change.
+    """
+
+    query: str
+    results: list[SearchHit]
+
+
 def from_llm_response(payload: LLMInvoiceResponse) -> ExtractedInvoice:
     """Convert a wire-format LLM response into a domain model.
 

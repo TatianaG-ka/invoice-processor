@@ -18,6 +18,7 @@ of its ingestion path.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -35,9 +36,11 @@ from app.db.repositories.invoice_repository import (
 from app.db.session import get_db
 from app.queue.connection import queue_dependency
 from app.queue.tasks import process_pdf_invoice
-from app.schemas.invoice import StoredInvoice
+from app.schemas.invoice import SearchHit, SearchResponse, StoredInvoice
 from app.schemas.job import JobAccepted, JobStatus
+from app.services import embedder
 from app.services.ksef_parser import KSeFParseError, parse_ksef
+from app.services.vector_store import VectorStore, index_invoice, vector_store_dependency
 
 
 @asynccontextmanager
@@ -200,7 +203,59 @@ async def upload_ksef_invoice(
 
     repo = InvoiceRepository(session)
     saved = await repo.save(invoice)
+    # Best-effort indexing: a Qdrant outage must not block a successful
+    # parse + persist. Same contract as the PDF/queue path.
+    index_invoice(saved.id, invoice)
     return orm_to_stored_invoice(saved)
+
+
+@app.get(
+    "/invoices/search",
+    response_model=SearchResponse,
+    tags=["Invoices"],
+)
+async def search_invoices(
+    q: str,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    store: Annotated[VectorStore, Depends(vector_store_dependency)],
+    limit: int = 10,
+) -> SearchResponse:
+    """Semantic search over persisted invoices.
+
+    Registered **before** ``GET /invoices/{invoice_id}`` so FastAPI's
+    in-order path matching routes ``/invoices/search`` here rather than
+    trying to coerce ``"search"`` into an ``int`` invoice id.
+
+    The Qdrant call is offloaded to a thread because the client is
+    synchronous; the embed call is CPU-bound (fast on short queries)
+    but offloaded for the same reason — we don't want the event loop
+    blocked while the model runs.
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query 'q' must not be empty.")
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=400, detail="'limit' must be between 1 and 100."
+        )
+
+    query_vector = await asyncio.to_thread(embedder.embed, q)
+    hits = await asyncio.to_thread(store.search, query_vector, limit)
+
+    if not hits:
+        return SearchResponse(query=q, results=[])
+
+    repo = InvoiceRepository(session)
+    results: list[SearchHit] = []
+    for invoice_id, score in hits:
+        row = await repo.get_by_id(invoice_id)
+        if row is None:
+            # Qdrant can out-live the DB record in edge cases (manual
+            # row delete, restore from backup). Skip silently rather
+            # than 500 — the user's result list just gets shorter.
+            continue
+        results.append(SearchHit(score=score, invoice=orm_to_stored_invoice(row)))
+
+    return SearchResponse(query=q, results=results)
 
 
 @app.get(

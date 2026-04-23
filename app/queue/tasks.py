@@ -23,6 +23,7 @@ from app.db.repositories.invoice_repository import InvoiceRepository
 from app.schemas.invoice import ExtractedInvoice
 from app.services.invoice_extractor import extract_invoice
 from app.services.pdf_text_extractor import extract_text
+from app.services.vector_store import index_invoice
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,10 @@ def process_pdf_invoice(pdf_bytes: bytes, filename: str | None = None) -> int:
     text = extract_text(pdf_bytes)
     invoice = extract_invoice(text)
     invoice_id = _run_coroutine_blocking(_persist(invoice))
+    # Best-effort indexing after the DB commit: if Qdrant is unavailable
+    # the job still succeeds and the invoice is retrievable by id —
+    # only semantic search loses that record until a backfill runs.
+    index_invoice(invoice_id, invoice)
     logger.info("process_pdf_invoice done invoice_id=%d", invoice_id)
     return invoice_id
 
