@@ -25,9 +25,12 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import create_all
-from app.db.repositories.invoice_repository import InvoiceRepository
+from app.db.repositories.invoice_repository import (
+    InvoiceRepository,
+    orm_to_stored_invoice,
+)
 from app.db.session import get_db
-from app.schemas.invoice import StoredInvoice, stored_from_orm
+from app.schemas.invoice import StoredInvoice
 from app.services.invoice_extractor import InvoiceExtractionError, extract_invoice
 from app.services.pdf_text_extractor import extract_text
 
@@ -118,7 +121,7 @@ async def upload_invoice(
 
     repo = InvoiceRepository(session)
     saved = await repo.save(invoice)
-    return stored_from_orm(saved)
+    return orm_to_stored_invoice(saved)
 
 
 @app.get(
@@ -135,7 +138,7 @@ async def get_invoice(
     row = await repo.get_by_id(invoice_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found")
-    return stored_from_orm(row)
+    return orm_to_stored_invoice(row)
 
 
 if __name__ == "__main__":

@@ -85,11 +85,11 @@ class ExtractedInvoice(BaseModel):
     This is the target schema for every extractor — LLM-based
     (Phase 2), KSeF XML parser (Phase 4), OCR-driven (Phase 5). All
     downstream consumers depend on this shape.
-    """
 
-    model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: float(v)},
-    )
+    Decimal fields on the nested ``Money`` annotation serialise to
+    strings by Pydantic v2 default, which is what we want for monetary
+    precision — no top-level ``json_encoders`` needed.
+    """
 
     invoice_number: str | None = None
     issue_date: date | None = None
@@ -155,40 +155,16 @@ class StoredInvoice(ExtractedInvoice):
     Extends :class:`ExtractedInvoice` with the DB-assigned ``id`` and
     ``created_at`` timestamp so clients can reference the row in
     subsequent calls (GET /invoices/{id}).
+
+    Note: Pydantic v2 does NOT merge ``model_config`` from parent
+    classes. We re-declare here to add ``from_attributes=True`` — the
+    rest of the parent's (non-config) fields are inherited normally.
     """
 
-    model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: float(v)},
-        from_attributes=True,
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     created_at: datetime
-
-
-def stored_from_orm(row) -> StoredInvoice:
-    """Build a :class:`StoredInvoice` from an :class:`~app.db.models.Invoice`.
-
-    Kept outside the schema module's import graph to avoid a cyclical
-    dependency: ``app.db.models`` imports the ORM base, which imports
-    nothing schema-related. The inverse mapping (schema → ORM) lives
-    in the repository.
-    """
-    return StoredInvoice(
-        id=row.id,
-        created_at=row.created_at,
-        invoice_number=row.invoice_number,
-        issue_date=row.issue_date,
-        seller=Party(name=row.seller_name, nip=row.seller_nip, address=row.seller_address),
-        buyer=Party(name=row.buyer_name, nip=row.buyer_nip, address=row.buyer_address),
-        line_items=[LineItem(**item) for item in (row.line_items or [])],
-        totals=Totals(
-            net=row.total_net,
-            vat=row.total_vat,
-            gross=row.total_gross,
-            currency=row.currency,
-        ),
-    )
 
 
 def from_llm_response(payload: LLMInvoiceResponse) -> ExtractedInvoice:

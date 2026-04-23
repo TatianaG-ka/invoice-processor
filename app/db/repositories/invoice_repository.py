@@ -1,20 +1,29 @@
 """Repository for :class:`~app.db.models.Invoice` rows.
 
 The repository owns the mapping between the domain model
-(:class:`~app.schemas.invoice.ExtractedInvoice`) and the ORM model,
-so that routes and services stay domain-level and do not import
-SQLAlchemy types.
+(:class:`~app.schemas.invoice.ExtractedInvoice`) and the ORM model in
+both directions, so that routes and services stay domain-level and do
+not import SQLAlchemy types.
 """
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Invoice
-from app.schemas.invoice import ExtractedInvoice
+from app.schemas.invoice import (
+    ExtractedInvoice,
+    LineItem,
+    Party,
+    StoredInvoice,
+    Totals,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class InvoiceRepository:
@@ -34,6 +43,10 @@ class InvoiceRepository:
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
+        # NIPs are personal data under GDPR and invoice counterparties
+        # may be sensitive — log only the internal id and the invoice
+        # number, never party NIPs or addresses.
+        logger.info("Persisted invoice id=%d number=%r", row.id, row.invoice_number)
         return row
 
     async def get_by_id(self, invoice_id: int) -> Invoice | None:
@@ -45,6 +58,29 @@ class InvoiceRepository:
         stmt = select(Invoice).order_by(Invoice.id.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+
+def orm_to_stored_invoice(row: Invoice) -> StoredInvoice:
+    """Build a :class:`StoredInvoice` from an :class:`Invoice` ORM row.
+
+    Lives in the DB layer — this is ORM→schema mapping and should not
+    leak SQLAlchemy types into the schema module.
+    """
+    return StoredInvoice(
+        id=row.id,
+        created_at=row.created_at,
+        invoice_number=row.invoice_number,
+        issue_date=row.issue_date,
+        seller=Party(name=row.seller_name, nip=row.seller_nip, address=row.seller_address),
+        buyer=Party(name=row.buyer_name, nip=row.buyer_nip, address=row.buyer_address),
+        line_items=[LineItem(**item) for item in (row.line_items or [])],
+        totals=Totals(
+            net=row.total_net,
+            vat=row.total_vat,
+            gross=row.total_gross,
+            currency=row.currency,
+        ),
+    )
 
 
 def _to_orm(extracted: ExtractedInvoice) -> Invoice:
@@ -66,7 +102,7 @@ def _to_orm(extracted: ExtractedInvoice) -> Invoice:
     )
 
 
-def _line_item_to_json(line_item) -> dict:
+def _line_item_to_json(line_item: LineItem) -> dict:
     """Serialise a :class:`LineItem` for JSON storage.
 
     ``Decimal`` is not JSON-native; the column is JSON, so we stringify
