@@ -20,10 +20,10 @@ pdf2image==1.17.0
 Pillow==11.0.0
 openai==1.51.0
 
-# --- Tydzień 1 Dzień 3: Database ---
+# --- Phase 3: Database (async SQLAlchemy 2.0, no Alembic) ---
 sqlalchemy==2.0.35
-psycopg2-binary==2.9.9
-alembic==1.13.3
+asyncpg==0.30.0        # async Postgres driver (replaces psycopg2-binary)
+aiosqlite==0.20.0      # async SQLite for in-memory test DB
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
 
