@@ -122,6 +122,11 @@ tmp/
 !docs/dane_testowe/*.pdf
 
 # ============================================
+# Manual smoke tests (konsumują real API credits, per-dev tools)
+# ============================================
+scripts/smoke_test_*.py
+
+# ============================================
 # Docker
 # ============================================
 .dockerignore.local
