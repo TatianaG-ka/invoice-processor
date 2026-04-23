@@ -123,6 +123,57 @@ class TestHelpers:
         }
 
 
+class TestReindexAll:
+    """Cold-start reindex: rebuild Qdrant from Postgres on container boot.
+
+    Exercised end-to-end via the KSeF upload → reset the vector store
+    → reindex_all → search still finds the invoice. Asserts the whole
+    Postgres → build_invoice_text → embed → upsert chain works without
+    any of the usual FastAPI or queue plumbing.
+    """
+
+    async def test_reindex_is_noop_on_empty_db(self, test_vector_store: VectorStore):
+        from app.services.vector_store import reindex_all
+
+        assert await reindex_all(store=test_vector_store) == 0
+
+    async def test_reindex_rebuilds_from_saved_invoices(
+        self,
+        client,
+        ksef_fa2_bytes: bytes,
+        test_vector_store: VectorStore,
+    ):
+        # 1. Save an invoice through the normal path (populates Postgres + Qdrant).
+        response = client.post(
+            "/invoices/ksef",
+            files={"file": ("fa2.xml", ksef_fa2_bytes, "application/xml")},
+        )
+        assert response.status_code == 201
+        invoice_id = response.json()["id"]
+
+        # 2. Simulate a Cloud Run instance swap: the vector store is fresh
+        #    but Postgres still has the row.
+        fresh_client = QdrantClient(":memory:")
+        collection = f"reindex-{invoice_id}"
+        fresh_store = VectorStore(client=fresh_client, collection=collection)
+        fresh_store.ensure_collection()
+        assert fresh_store.search(_unit_vector(0), limit=10) == []
+
+        # 3. Reindex must repopulate the fresh store from the DB.
+        from app.services.vector_store import reindex_all
+
+        count = await reindex_all(store=fresh_store)
+        assert count == 1
+
+        # 4. The rebuilt store must now be able to serve queries.
+        from app.services import embedder
+
+        vector = embedder.embed("Acme Sp. z o.o.")
+        hits = fresh_store.search(vector, limit=10)
+        assert hits, "Expected reindexed invoice to be searchable"
+        assert hits[0][0] == invoice_id
+
+
 class TestIndexInvoice:
     def test_success_returns_true_and_point_is_searchable(self, test_vector_store: VectorStore):
         invoice = _make_invoice("Drukarnia XYZ", ["Toner HP LaserJet"])

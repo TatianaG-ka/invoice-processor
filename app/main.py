@@ -19,6 +19,7 @@ of its ingestion path.
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -41,13 +42,31 @@ from app.schemas.invoice import SearchHit, SearchResponse, StoredInvoice
 from app.schemas.job import JobAccepted, JobStatus
 from app.services import embedder
 from app.services.ksef_parser import KSeFParseError, parse_ksef
-from app.services.vector_store import VectorStore, index_invoice, vector_store_dependency
+from app.services.vector_store import (
+    VectorStore,
+    index_invoice,
+    reindex_all,
+    vector_store_dependency,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create tables on startup; no shutdown work beyond engine disposal."""
+    """Startup: create tables, then warm the search index from Postgres.
+
+    The embedded Qdrant store rides on Cloud Run's ephemeral filesystem,
+    so every container boot needs to rebuild the index from the DB
+    (which is durable on Neon). Reindex errors are non-fatal: a degraded
+    search path must not keep the API from serving the rest of its
+    surface, so we log and continue.
+    """
     await create_all()
+    try:
+        await reindex_all()
+    except Exception:  # noqa: BLE001 — startup must not die on search warmup
+        logger.exception("Startup reindex failed; search will be empty until first write")
     yield
 
 

@@ -161,6 +161,49 @@ def build_invoice_payload(invoice_id: int, extracted: Any) -> dict[str, Any]:
     }
 
 
+async def reindex_all(store: VectorStore | None = None) -> int:
+    """Rebuild the Qdrant index from Postgres. Returns rows processed.
+
+    Cloud Run's container filesystem is ephemeral — the embedded Qdrant
+    store we ship with the API container vanishes between instance
+    replacements. Postgres (Neon) is the system of record, so every
+    cold start replays every invoice through the embedder and upserts
+    it into Qdrant. The DB is bounded to hundreds of rows for this
+    portfolio scope; chunked iteration would be the next step if that
+    assumption breaks.
+
+    Called once from the FastAPI lifespan after ``create_all()``.
+    Failures are absorbed at the caller (lifespan) — a degraded search
+    index must not block the API from starting and serving the KSeF
+    route, ``GET /invoices/{id}``, or the rest of the surface.
+
+    ``index_invoice`` does the real work per row and keeps the same
+    best-effort contract (log + continue on individual failures), so a
+    single malformed row does not abort the entire warmup.
+    """
+    # Local imports keep the module's top-level surface free of DB
+    # dependencies — the vector store should be importable without
+    # standing up SQLAlchemy, which matters for tooling.
+    from app.db.base import get_sessionmaker
+    from app.db.repositories.invoice_repository import (
+        InvoiceRepository,
+        orm_to_stored_invoice,
+    )
+
+    actual_store = store or get_store()
+    factory = get_sessionmaker()
+    count = 0
+    async with factory() as session:
+        repo = InvoiceRepository(session)
+        rows = await repo.list_all(limit=10_000)
+        for row in rows:
+            stored = orm_to_stored_invoice(row)
+            if index_invoice(row.id, stored, store=actual_store):
+                count += 1
+    logger.info("Startup reindex: %d invoice(s) rewired into Qdrant", count)
+    return count
+
+
 def index_invoice(
     invoice_id: int,
     extracted: Any,
