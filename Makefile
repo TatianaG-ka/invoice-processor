@@ -1,13 +1,13 @@
 # ============================================
-# Invoice Processor - Makefile
+# Invoice Processor — Makefile
 # ============================================
-# Użycie: make [cel]
-# Lista celów: make help
+# Usage: make [target]
+# List targets: make help
 
 .PHONY: help install dev up down restart logs shell test test-cov lint format clean db-shell
 
-help:  ## Pokaż dostępne komendy
-	@echo "Invoice Processor - dostępne komendy:"
+help:  ## Show available commands
+	@echo "Invoice Processor — available commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -15,28 +15,28 @@ help:  ## Pokaż dostępne komendy
 
 # ===== Setup =====
 
-install:  ## Instaluj wszystkie zależności (prod + dev)
+install:  ## Install all dependencies (prod + dev)
 	pip install -r requirements.txt
 	pip install -r requirements-dev.txt
 
 # ===== Local development =====
 
-dev:  ## Uruchom aplikację lokalnie (bez Dockera, z hot reload)
+dev:  ## Run the app locally (no Docker, with hot reload)
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # ===== Docker =====
 
-up:  ## Uruchom wszystkie serwisy (docker-compose up)
+up:  ## Start all services (docker-compose up)
 	docker-compose up --build -d
 	@echo ""
 	@echo "  API:         http://localhost:8000"
 	@echo "  Swagger UI:  http://localhost:8000/docs"
 	@echo "  Postgres:    localhost:5432"
 	@echo ""
-	@echo "Logi: make logs"
+	@echo "Logs: make logs"
 	@echo "Stop: make down"
 
-up-v2:  ## Uruchom pełną wersję PRO (api + worker + postgres + redis + qdrant)
+up-v2:  ## Start full stack (api + worker + postgres + redis + qdrant)
 	docker-compose -f docker-compose.v2.yml up --build -d
 	@echo ""
 	@echo "  API:          http://localhost:8000"
@@ -45,47 +45,47 @@ up-v2:  ## Uruchom pełną wersję PRO (api + worker + postgres + redis + qdrant
 	@echo "  Postgres:     localhost:5432"
 	@echo "  Redis:        localhost:6379"
 
-down:  ## Zatrzymaj wszystkie serwisy
+down:  ## Stop all services
 	docker-compose down
 	-docker-compose -f docker-compose.v2.yml down
 
-restart:  ## Restart serwisów
+restart:  ## Restart services
 	make down
 	make up
 
-logs:  ## Pokaż logi (follow)
+logs:  ## Tail logs
 	docker-compose logs -f
 
-shell:  ## Shell wewnątrz kontenera api
+shell:  ## Shell inside the api container
 	docker-compose exec api bash
 
-db-shell:  ## Shell PostgreSQL
+db-shell:  ## PostgreSQL shell
 	docker-compose exec postgres psql -U invoice_user -d invoices
 
-# ===== Testy =====
+# ===== Tests =====
 
-test:  ## Uruchom testy
+test:  ## Run tests
 	pytest -v
 
-test-cov:  ## Testy z pokryciem kodu
+test-cov:  ## Tests with coverage report
 	pytest --cov=app --cov-report=term-missing --cov-report=html
-	@echo "Raport HTML: htmlcov/index.html"
+	@echo "HTML report: htmlcov/index.html"
 
-# ===== Jakość kodu =====
+# ===== Code quality =====
 
-lint:  ## Sprawdź kod (ruff)
+lint:  ## Lint (ruff)
 	ruff check app tests
 
-format:  ## Sformatuj kod (black + ruff --fix)
+format:  ## Format (black + ruff --fix)
 	black app tests
 	ruff check --fix app tests
 
 typecheck:  ## Type checking (mypy)
 	mypy app
 
-# ===== Porządki =====
+# ===== Cleanup =====
 
-clean:  ## Usuń cache i pliki tymczasowe
+clean:  ## Remove caches and temporary files
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
@@ -94,6 +94,6 @@ clean:  ## Usuń cache i pliki tymczasowe
 	find . -type f -name "*.pyc" -delete
 	rm -rf uploads/ 2>/dev/null || true
 
-clean-docker:  ## Usuń kontenery, wolumeny i obrazy (OSTROŻNIE - kasuje dane w postgres!)
+clean-docker:  ## Remove containers, volumes and images (CAUTION — wipes Postgres data!)
 	docker-compose down -v
 	docker-compose -f docker-compose.v2.yml down -v

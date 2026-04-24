@@ -1,20 +1,21 @@
-"""Pytest fixtures - reużywalne obiekty dla testów.
+"""Shared pytest fixtures.
 
-Importowane automatycznie przez pytest w każdym pliku testowym.
+Every test runs against an in-memory ``sqlite+aiosqlite`` database, a
+fakeredis-backed synchronous RQ queue, and an in-memory Qdrant store
+with a deterministic md5-keyed fake embedder. Three autouse fixtures
+override:
 
-Phase 3 addition: every test runs against an in-memory
-``sqlite+aiosqlite`` database. The shared fixture creates/destroys the
-schema per test and overrides the FastAPI ``get_db`` dependency so the
-``client`` TestClient sees the test DB rather than the real Postgres
-URL configured in ``settings``.
+1. ``app.db.session.get_db`` (FastAPI DI) and ``app.db.base._engine`` /
+   ``_sessionmaker`` (module-level singletons used by queue tasks).
+2. ``app.queue.connection.queue_dependency`` and the corresponding
+   module-level ``_redis_client`` / ``_queue`` singletons.
+3. ``app.services.vector_store.vector_store_dependency`` and the
+   ``_store`` / ``_client`` singletons; ``embedder.embed`` is replaced
+   by ``fake_embed`` so no test ever loads the real transformer
+   checkpoint.
 
-Phase 5 addition: every test also gets a fakeredis-backed RQ queue
-running in synchronous mode (``is_async=False``). Enqueued jobs
-execute inline inside the route handler so the endpoint tests observe
-a realistic 202 → finished lifecycle without running a worker
-process. The same autouse fixture retargets
-:func:`app.db.base.get_sessionmaker` at the in-memory test engine so
-the task function's ``asyncio.run`` pipeline hits the test DB too.
+Net effect: tests are hermetic by default — no real network, no real
+Postgres, no real Redis, no transformer download.
 """
 
 from __future__ import annotations
@@ -250,7 +251,7 @@ def _override_vector_store(test_vector_store: VectorStore, monkeypatch):
 
 @pytest.fixture
 def client() -> TestClient:
-    """TestClient dla endpointów FastAPI (synchronous)."""
+    """Synchronous FastAPI TestClient."""
     return TestClient(app)
 
 
@@ -269,11 +270,11 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 def fixtures_dir() -> Path:
-    """Katalog z syntetycznymi fakturami testowymi.
+    """Directory holding synthetic test invoices.
 
-    PDFy żyją w `<repo>/docs/dane_testowe/`, nie w `<repo>/tests/fixtures/`,
-    bo są również częścią dokumentacji projektu (synthetic samples opisane
-    w README). Jeden kanoniczny path zamiast duplikatów.
+    PDFs live in ``<repo>/docs/dane_testowe/`` (not ``<repo>/tests/fixtures/``)
+    because they double as documentation of the synthetic samples
+    described in the README. One canonical path, no duplicates.
     """
     return Path(__file__).resolve().parent.parent / "docs" / "dane_testowe"
 
@@ -281,37 +282,37 @@ def fixtures_dir() -> Path:
 def _load_fixture(fixtures_dir: Path, name: str) -> bytes:
     path = fixtures_dir / name
     if not path.exists():
-        pytest.skip(f"Brak pliku {path}. Uruchom `scripts/generate_test_pdf.py`.")
+        pytest.skip(f"Missing fixture {path}. Run `scripts/generate_test_pdf.py`.")
     return path.read_bytes()
 
 
 @pytest.fixture
 def faktura_01_bytes(fixtures_dir: Path) -> bytes:
-    """Prosty układ faktury."""
+    """Simple invoice layout."""
     return _load_fixture(fixtures_dir, "faktura_01_prosta.pdf")
 
 
 @pytest.fixture
 def faktura_02_bytes(fixtures_dir: Path) -> bytes:
-    """Faktura z tabelą pozycji."""
+    """Invoice with line-item table."""
     return _load_fixture(fixtures_dir, "faktura_02_z_tabela.pdf")
 
 
 @pytest.fixture
 def faktura_03_bytes(fixtures_dir: Path) -> bytes:
-    """Wariant angielski."""
+    """English-language variant."""
     return _load_fixture(fixtures_dir, "faktura_03_english.pdf")
 
 
 @pytest.fixture
 def faktura_04_bytes(fixtures_dir: Path) -> bytes:
-    """Duże kwoty."""
+    """Large amounts."""
     return _load_fixture(fixtures_dir, "faktura_04_duze_kwoty.pdf")
 
 
 @pytest.fixture
 def faktura_05_bytes(fixtures_dir: Path) -> bytes:
-    """Minimalne wymagane pola."""
+    """Minimal required fields only."""
     return _load_fixture(fixtures_dir, "faktura_05_minimalna.pdf")
 
 
@@ -326,14 +327,13 @@ def faktura_05_bytes(fixtures_dir: Path) -> bytes:
     ids=["prosta", "z_tabela", "english", "duze_kwoty", "minimalna"],
 )
 def all_faktury_bytes(request: pytest.FixtureRequest, fixtures_dir: Path) -> bytes:
-    """Parametrized fixture — każdy test używający tego fixture'u przechodzi
-    5× (raz per synthetic invoice)."""
+    """Parametrized fixture — any test using this runs 5× (once per synthetic invoice)."""
     return _load_fixture(fixtures_dir, request.param)
 
 
 @pytest.fixture
 def sample_pdf_bytes(faktura_01_bytes: bytes) -> bytes:
-    """Backward-compat alias dla pierwszej faktury."""
+    """Backward-compat alias for the first synthetic invoice."""
     return faktura_01_bytes
 
 

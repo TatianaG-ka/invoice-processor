@@ -1,26 +1,20 @@
 """
-Skrypt do wygenerowania testowej faktury PDF.
+Generate a synthetic invoice PDF for OCR / extraction tests.
 
-Użycie:
+Usage:
     pip install reportlab
     python scripts/generate_test_pdf.py
 
-Wygeneruje: tests/fixtures/sample_invoice.pdf
+Output: tests/fixtures/sample_invoice.pdf
 
-Dlaczego to istnieje?
-Nie chciałam commitować prawdziwych faktur do publicznego repo (RODO + NDA).
-Zamiast tego - generujesz fikcyjną fakturę z realistycznymi danymi,
-które wystarczą do testów OCR + ekstrakcji przez LLM.
-
-Możesz też użyć prawdziwej faktury - po prostu zanonimizuj dane i wrzuć
-jako tests/fixtures/sample_invoice.pdf.
+The fixture uses checksum-invalid placeholder NIPs (0000000000, 1111111111)
+to guarantee no collision with real registered Polish companies.
 """
 
 from pathlib import Path
 
 
 def generate_sample_invoice():
-    """Generuje testową fakturę PDF z fikcyjnymi danymi."""
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
@@ -28,10 +22,9 @@ def generate_sample_invoice():
         from reportlab.lib.units import cm
         from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except ImportError:
-        print("❌ Brak reportlab. Zainstaluj: pip install reportlab")
+        print("Missing dependency. Install: pip install reportlab")
         return
 
-    # Ścieżka docelowa
     output_path = Path(__file__).parent.parent / "tests" / "fixtures" / "sample_invoice.pdf"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -47,23 +40,20 @@ def generate_sample_invoice():
     styles = getSampleStyleSheet()
     story = []
 
-    # Tytuł
     story.append(Paragraph("<b>FAKTURA VAT</b>", styles["Title"]))
     story.append(Paragraph("Nr: FV/2026/04/0123", styles["Heading2"]))
     story.append(Spacer(1, 0.5 * cm))
 
-    # Daty
     story.append(Paragraph("Data wystawienia: 2026-04-15", styles["Normal"]))
     story.append(Paragraph("Data sprzedaży: 2026-04-15", styles["Normal"]))
     story.append(Paragraph("Termin płatności: 2026-04-29", styles["Normal"]))
     story.append(Spacer(1, 0.5 * cm))
 
-    # Sprzedawca i nabywca
     seller_buyer = [
         ["SPRZEDAWCA", "NABYWCA"],
         [
-            "ACME Technologies Sp. z o.o.\nul. Testowa 42/10\n00-001 Warszawa\nNIP: 5252344078",
-            "Testowa Firma S.A.\nul. Przykładowa 1\n00-002 Warszawa\nNIP: 1234567890",
+            "ACME Technologies Sp. z o.o.\nul. Testowa 42/10\n00-001 Warszawa\nNIP: 0000000000",
+            "Testowa Firma S.A.\nul. Przykładowa 1\n00-002 Warszawa\nNIP: 1111111111",
         ],
     ]
     table1 = Table(seller_buyer, colWidths=[8 * cm, 8 * cm])
@@ -83,7 +73,6 @@ def generate_sample_invoice():
     story.append(table1)
     story.append(Spacer(1, 1 * cm))
 
-    # Pozycje faktury
     items = [
         ["Lp.", "Nazwa usługi", "Ilość", "Cena netto", "VAT", "Wartość brutto"],
         ["1.", "Usługi konsultingowe IT", "10 godz.", "200,00 zł", "23%", "2 460,00 zł"],
@@ -106,24 +95,21 @@ def generate_sample_invoice():
     story.append(table2)
     story.append(Spacer(1, 0.5 * cm))
 
-    # Podsumowanie
     story.append(Paragraph("<b>Razem netto: 10 000,00 zł</b>", styles["Normal"]))
     story.append(Paragraph("<b>VAT (23%): 2 300,00 zł</b>", styles["Normal"]))
     story.append(Paragraph("<b>Razem brutto: 12 300,00 zł</b>", styles["Heading2"]))
     story.append(Paragraph("Słownie: dwanaście tysięcy trzysta złotych 00/100", styles["Italic"]))
     story.append(Spacer(1, 1 * cm))
 
-    # Sposób płatności
     story.append(Paragraph("<b>Sposób płatności:</b> przelew", styles["Normal"]))
     story.append(
         Paragraph("<b>Numer konta:</b> 12 3456 7890 1234 5678 9012 3456", styles["Normal"])
     )
 
-    # Generuj
     doc.build(story)
-    print(f"✅ Wygenerowano: {output_path}")
-    print(f"   Rozmiar: {output_path.stat().st_size / 1024:.1f} KB")
-    print("\nTeraz możesz uruchomić testy: pytest tests/")
+    print(f"Generated: {output_path}")
+    print(f"Size: {output_path.stat().st_size / 1024:.1f} KB")
+    print("Run tests: pytest tests/")
 
 
 if __name__ == "__main__":

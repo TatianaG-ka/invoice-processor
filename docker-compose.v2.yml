@@ -1,15 +1,10 @@
 # ============================================
-# Invoice Processor - docker-compose (v2 PRO)
+# Invoice Processor — docker-compose (full stack)
 # ============================================
-# Pełna wersja dla tygodnia 2 (dzień 9-10).
-# Zawiera: api, worker, postgres, redis, qdrant.
+# Includes: api, worker, postgres, redis, qdrant.
 #
-# Używaj TEJ wersji kiedy zaimplementujesz async + Redis + Qdrant.
-#
-# Użycie:
-#   docker-compose -f docker-compose.v2.yml up --build
-#
-# Albo: zmień nazwy plików - v1 na v1.yml, v2 na docker-compose.yml
+# Start:  docker-compose -f docker-compose.v2.yml up --build
+# Stop:   docker-compose -f docker-compose.v2.yml down
 
 services:
   api:
@@ -68,7 +63,7 @@ services:
     volumes:
       - ./app:/code/app
     restart: unless-stopped
-    # WSKAZÓWKA: możesz uruchomić kilka workerów:
+    # Scale workers horizontally:
     # docker-compose -f docker-compose.v2.yml up --scale worker=3
 
   postgres:

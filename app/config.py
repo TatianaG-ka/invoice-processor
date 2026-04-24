@@ -1,17 +1,9 @@
-"""
-Konfiguracja aplikacji - ładowanie ustawień z .env.
+"""Application configuration loaded from .env via pydantic-settings.
 
-UŻYWASZ OD DNIA 2 (kiedy dodajesz OPENAI_API_KEY).
-
-Użycie:
+Usage:
     from app.config import settings
     print(settings.OPENAI_API_KEY)
     print(settings.DATABASE_URL)
-
-Dzięki pydantic-settings otrzymujesz:
-- Automatyczne ładowanie z .env
-- Walidację typów
-- Error messages jeśli brakuje zmiennej
 """
 
 from dotenv import load_dotenv
@@ -26,7 +18,7 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    """Ustawienia aplikacji ładowane z .env."""
+    """Application settings loaded from .env."""
 
     # --- AI / LLM ---
     OPENAI_API_KEY: str = ""
@@ -37,20 +29,20 @@ class Settings(BaseSettings):
     # this for ``sqlite+aiosqlite:///:memory:`` via conftest.
     DATABASE_URL: str = "postgresql+asyncpg://invoice_user:invoice_pass@localhost:5432/invoices"
 
-    # --- Redis (od tygodnia 2) ---
+    # --- Redis (queue backend) ---
     REDIS_URL: str = "redis://localhost:6379"
 
-    # --- Qdrant (od tygodnia 2) ---
+    # --- Qdrant (vector store) ---
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION: str = "invoices"
 
-    # --- Aplikacja ---
+    # --- Application ---
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
     MAX_FILE_SIZE_MB: int = 10
 
-    # --- Strategia ekstrakcji ---
-    EXTRACTOR_STRATEGY: str = "openai"  # 'openai' lub 'local'
+    # --- Extraction strategy ---
+    EXTRACTOR_STRATEGY: str = "openai"  # 'openai' or 'mock'
 
     # --- OCR ---
     OCR_LANGUAGES: str = "pol+eng"
@@ -75,5 +67,5 @@ class Settings(BaseSettings):
     )
 
 
-# Singleton - importuj to, nie twórz nowej instancji
+# Singleton — import this, do not instantiate Settings yourself.
 settings = Settings()

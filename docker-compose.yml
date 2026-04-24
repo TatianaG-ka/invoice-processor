@@ -1,16 +1,11 @@
 # ============================================
-# Invoice Processor - docker-compose (v1 MVP)
+# Invoice Processor — docker-compose (minimal)
 # ============================================
-# Ta wersja dla tygodnia 1 (dzień 5).
-# Rozbuduj w tygodniu 2 o serwisy redis, worker, qdrant.
+# API + Postgres only. See docker-compose.v2.yml for the full stack
+# (api + worker + postgres + redis + qdrant).
 #
-# Zobacz docker-compose.v2.yml dla pełnej wersji PRO.
-#
-# Uruchomienie:
-#   docker-compose up --build
-#
-# Zatrzymanie:
-#   docker-compose down
+# Start:  docker-compose up --build
+# Stop:   docker-compose down
 
 services:
   api:
@@ -30,7 +25,7 @@ services:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      # Hot reload - zmiany w kodzie bez restartu kontenera
+      # Hot reload — code changes without container restart
       - ./app:/code/app
     restart: unless-stopped
 

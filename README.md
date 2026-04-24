@@ -221,7 +221,7 @@ tests/                      # 143 tests, hermetic, ~5 s
 ## Author
 
 **Tatiana Golińska** — Workflow Automation Engineer (n8n, Python, AI integration)
-[LinkedIn](https://www.linkedin.com/in/tatiana-golinska/) · tatiana.golinska@gmail.com
+[LinkedIn](https://www.linkedin.com/in/tatiana-golinska/)
 
 ---
 

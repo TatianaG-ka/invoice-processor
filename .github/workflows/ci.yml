@@ -1,6 +1,5 @@
 name: CI
 
-# Kiedy się uruchamia
 on:
   push:
     branches: [main, develop]
@@ -41,7 +40,7 @@ jobs:
     name: Run tests
     runs-on: ubuntu-latest
 
-    # Serwisy potrzebne do testów integracyjnych
+    # Services required by integration tests
     services:
       postgres:
         image: postgres:16-alpine
@@ -103,14 +102,3 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
-
-# ============================================
-# WSKAZÓWKI:
-# ============================================
-# - Ten workflow używasz od tygodnia 2 (dzień 12 projektu)
-# - Na początku możesz zakomentować job 'test' jeśli testy nie są gotowe
-# - Sekrety (np. prawdziwy OPENAI_API_KEY do deployment) dodajesz w:
-#   Settings → Secrets and variables → Actions → New repository secret
-# - Na dashboardzie GitHuba zobaczysz zielone/czerwone ikony przy commitach
-# - Dodaj badge do README:
-#   ![CI](https://github.com/tatianagolinska/invoice-processor/actions/workflows/ci.yml/badge.svg)
