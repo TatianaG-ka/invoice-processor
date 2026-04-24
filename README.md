@@ -1,141 +1,230 @@
-# Invoice Processor API
+# Invoice Processor
 
-> **KSeF-compatible invoice intelligence service:** PDF / KSeF XML → parse + extract → PostgreSQL → semantic search via Qdrant.
+> **KSeF-compatible invoice intelligence microservice.** Ingest a Polish invoice (PDF or KSeF XML), extract structured fields with an LLM, persist to Postgres, make the archive semantically searchable.
 
-FastAPI microservice for Polish invoice processing with dual-schema KSeF support (FA(2) legacy + FA(3) current).
+**Live demo:** https://invoice-processor-510066601703.europe-central2.run.app
+([`/docs`](https://invoice-processor-510066601703.europe-central2.run.app/docs) for the interactive OpenAPI UI)
 
-> **🚧 Status:** Active development. Not production-ready yet. See roadmap below.
-
----
-
-## 🎯 Problem
-
-Polish businesses receive 60–100 invoices monthly in mixed formats (PDF, KSeF XML, scans). Manual processing is slow, error-prone, and doesn't scale. Starting February 2026, KSeF FA(3) is mandatory for large Polish companies.
-
-**Goal:** automate the full pipeline — ingest → parse → structured storage → semantic retrieval — with dual-schema KSeF compliance.
+![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
 
 ---
 
-## 🏗️ Architecture (planned)
+## What it does
 
+Polish businesses receive 60–100 invoices per month across three shapes: scanned PDFs, text-layer PDFs, and — as of **February 2026** — KSeF XML (legally mandatory for large companies). This service normalises all of them into one typed record and surfaces two things that matter downstream:
+
+1. **Structured fields** behind `GET /invoices/{id}` — seller, buyer, line items, totals, dates — all in a consistent JSON shape regardless of ingestion path.
+2. **Semantic retrieval** behind `GET /invoices/search?q=...` — cosine similarity over sentence embeddings of seller name + line-item descriptions, so "find invoices about printer toner" works without exact-string matching.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client([Client / n8n]) -->|POST /invoices PDF| API[FastAPI]
+    Client -->|POST /invoices/ksef XML| API
+    Client -->|GET /invoices/search| API
+
+    API -->|enqueue job| Queue[(Redis + RQ)]
+    Queue --> Worker[RQ Worker]
+    Worker -->|pdfplumber + pytesseract OCR fallback| Text[Raw text]
+    Text -->|OpenAI Structured Outputs| Extract[ExtractedInvoice]
+
+    API -->|KSeF XML: lxml dual-schema FA 2 / FA 3| Extract
+    Extract -->|async SQLAlchemy| PG[(PostgreSQL / Neon)]
+    Extract -->|sentence-transformers MiniLM 384-dim| QD[(Qdrant embedded)]
+
+    API -->|@observe decorator| LF[Langfuse Cloud]
+
+    PG -->|reindex on startup| QD
+
+    subgraph Cloud Run
+        API
+        Worker
+        QD
+    end
 ```
-┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│   Client     │──────▶   FastAPI    │──────▶ Redis Queue  │
-│  (API/n8n)   │      │   (async)    │      │    (RQ)      │
-└──────────────┘      └──────────────┘      └──────┬───────┘
-                             │                     │
-                             │                     ▼
-                      ┌──────▼──────┐      ┌──────────────┐
-                      │ PostgreSQL  │◀─────│   Worker     │
-                      │ (metadata)  │      │  - KSeF XML  │
-                      └─────────────┘      │  - OCR       │
-                             ▲             │  - LLM extract│
-                             │             │  - Embedding │
-                      ┌──────┴──────┐      └──────┬───────┘
-                      │   Qdrant    │◀────────────┘
-                      │ (semantic)  │
-                      └─────────────┘
-```
+
+**One-line summary of the read path:** embed query → Qdrant cosine top-K → hydrate full rows from Postgres (DB is system of record, vector store is refreshable).
 
 ---
 
-## 🛠️ Stack (planned)
+## Stack
 
-| Layer | Technology | Why |
+| Layer | Technology | Notes |
 |---|---|---|
-| API | **FastAPI** | Native async, Pydantic validation, auto OpenAPI |
-| Relational DB | **PostgreSQL** | Invoice metadata, audit, relations |
-| Vector DB | **Qdrant** | Semantic search across historical invoices |
-| Queue | **Redis + RQ** | Async processing of long-running tasks |
-| XML parsing | **lxml** | KSeF XSD-native, namespace-aware |
-| OCR | **pytesseract + pdf2image** | Open-source, local |
-| LLM | **OpenAI** (production) | Structured output JSON mode |
-| Embeddings | **sentence-transformers (ONNX)** | Local, multilingual, optimized for production |
-| Observability | **Langfuse** | LLM tracing + cost tracking |
-| Tests | **pytest** | Unit + integration |
-| Orchestration | **Docker Compose** | Multi-service dev |
-| CI/CD | **GitHub Actions** | Lint + test on every push |
+| HTTP API | FastAPI 0.115 + Pydantic v2 | Async endpoints, automatic OpenAPI |
+| Relational DB | PostgreSQL 16 (Neon managed in prod) | async SQLAlchemy 2.0 + asyncpg |
+| Vector store | Qdrant 1.11 (embedded in prod, server in dev) | 384-dim cosine over MiniLM |
+| Background queue | Redis + RQ 2.0 | `POST /invoices` (PDF) enqueues, worker does extract + persist + index |
+| PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically |
+| KSeF XML | lxml with dual-schema support | FA(2) legacy + FA(3) `http://crd.gov.pl/wzor/2025/06/25/13775/` |
+| LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.0003/call |
+| Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
+| Observability | Langfuse Cloud | `@observe` on OpenAI call, token/cost tracking |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 143 tests, ~5 s full run |
+| CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
+| Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
 ---
 
-## 🚀 Quick start
+## API reference
+
+| Route | Shape | Notes |
+|---|---|---|
+| `GET  /health` | `{status: "healthy"}` | Liveness probe |
+| `POST /invoices` | 202 + `{job_id, status_url}` | PDF upload, enqueues to worker |
+| `GET  /invoices/jobs/{id}` | `{status, invoice_id, error}` | Poll job status |
+| `POST /invoices/ksef` | 201 + `StoredInvoice` | KSeF XML, synchronous (fast parse) |
+| `GET  /invoices/{id}` | 200 + `StoredInvoice` | Retrieve by DB primary key |
+| `GET  /invoices/search?q=...&limit=10` | 200 + `SearchResponse` | Semantic search, DB-hydrated results |
+
+Every DB-touching endpoint narrows `sqlalchemy.exc.SQLAlchemyError` into a clean `503 Database temporarily unavailable.` — no stack trace ever reaches the wire.
+
+---
+
+## Live demo walkthrough
 
 ```bash
-# Clone
+URL=https://invoice-processor-510066601703.europe-central2.run.app
+
+# Health check
+curl "$URL/health"
+# {"status":"healthy"}
+
+# Upload a KSeF FA(2) invoice (synthetic, no real NIPs in this repo)
+curl -X POST -F "file=@docs/dane_testowe/ksef/faktura_fa2_sample.xml;type=application/xml" \
+  "$URL/invoices/ksef"
+# {"id":1,"invoice_number":"FV/FA2/001/2026","seller":{"name":"Acme Sp. z o.o.",...},"totals":{"gross":"1230.00",...}}
+
+# Semantic search
+curl "$URL/invoices/search?q=Acme"
+# {"query":"Acme","results":[{"score":0.398,"invoice":{"id":1,...}}]}
+```
+
+The `score` field is raw cosine similarity from MiniLM — the same sentence-transformers model that runs in production, not a test stub.
+
+---
+
+## Observability
+
+Every OpenAI call is wrapped with `@observe(as_type="generation")` from the Langfuse SDK. Each trace carries the full prompt, the parsed structured output, the model name, token counts, latency, and cost.
+
+| | |
+|---|---|
+| ![Traces list](docs/langfuse_traces_list.png) | Four observations (two SPAN parents, two GENERATION children) from two extraction calls. Model `gpt-4o-mini`, latency 5–6 s, **$0.000274 / call**. |
+| ![Trace detail](docs/langfuse_trace_detail.png) | Drilldown: raw FAKTURA VAT input on top, the parsed `ExtractedInvoice` JSON on the bottom — `invoice_number`, `seller.nip`, `buyer.nip`, `line_items`, `totals.net/vat/gross/currency`. |
+| ![Dashboard](docs/langfuse_dashboard.png) | Dashboard view: 2 traces, $0.000548 cumulative cost, 2.24 K tokens, cost/time chart over last 24 h. |
+
+The service degrades gracefully when Langfuse keys are absent: the decorator sees an empty `LANGFUSE_PUBLIC_KEY` and runs in no-op mode, which is how CI and local dev exercise the extractor without a Langfuse account.
+
+---
+
+## Architecture decisions
+
+### ADR-001 — Async SQLAlchemy 2.0 + asyncpg
+**Context:** FastAPI endpoints are async-native; a sync DB driver would either block the event loop or force thread-pool offload on every query.
+**Decision:** `create_async_engine` + `AsyncSession` throughout. `_prepare_async_url()` auto-rewrites `postgresql://…?sslmode=require` into the asyncpg-friendly shape (prefix swap + `connect_args={"ssl": "require"}`) so the Neon connection string can be pasted verbatim from the dashboard.
+**Consequence:** One concurrency model end-to-end. Sessions travel through FastAPI dependency injection in HTTP paths; the RQ worker owns its own sessionmaker for background jobs.
+
+### ADR-002 — No Alembic
+**Context:** Portfolio scope is one service, one schema, append-mostly workload. Alembic adds ceremony without payback.
+**Decision:** `Base.metadata.create_all(checkfirst=True)` runs in the FastAPI lifespan. Safe on every container start — SQLAlchemy's default `checkfirst` will not recreate existing tables.
+**Consequence:** No migration file to maintain, but also no schema-change safety net. Revisit if the row count grows past the demo's "hundreds" bound or if multiple instances need coordinated DDL.
+
+### ADR-003 — Dual KSeF schema (FA(2) legacy + FA(3) current)
+**Context:** The Polish Ministry of Finance rolled out FA(3) (`http://crd.gov.pl/wzor/2025/06/25/13775/`) as the mandatory format for large companies from **February 2026**, but FA(2) documents will continue to exist in archives and email traffic for years.
+**Decision:** `parse_ksef()` sniffs the root namespace and dispatches to one of two parsers. Both produce the same `ExtractedInvoice` domain model, so no downstream code knows which shape arrived.
+**Consequence:** Ingestion accepts both shapes today; dropping FA(2) later is a one-function delete.
+
+### ADR-004 — Embedded Qdrant + reindex-on-startup
+**Context:** Cloud Run has ephemeral container storage — anything written to the filesystem disappears on instance replacement. An external vector store (Qdrant Cloud) would solve persistence but adds a moving part to a portfolio demo.
+**Decision:** Ship Qdrant in-process (`QdrantClient(":memory:")`), and on every cold start walk every invoice in Postgres through `index_invoice` to rebuild the index. Postgres is the durable system of record; Qdrant is refreshable.
+**Consequence:** Zero external search dependency; bounded by "hundreds of rows fit comfortably in memory." A production-scale variant would swap `:memory:` for `file://` on a mounted volume, or an external Qdrant — the wrapper already supports all three shapes via `_build_client()`.
+
+### ADR-005 — Best-effort indexing, fail-loud persistence
+**Context:** Two side stores get written on a successful ingest — Postgres (rows) and Qdrant (vectors). Coupling their availability would mean a vector-store blip causes lost invoices.
+**Decision:** The repository `save` is on the critical path — a `SQLAlchemyError` propagates as `503`. `index_invoice` is wrapped in `try/except Exception → log + return False`: a broken embedder or a Qdrant outage degrades search coverage but never breaks the write path.
+**Consequence:** The DB is the source of truth; the vector store is a secondary projection that can always be rebuilt. Matches the reindex-on-startup contract from ADR-004.
+
+---
+
+## Local development
+
+```bash
 git clone https://github.com/TatianaG-ka/invoice-processor.git
 cd invoice-processor
+cp .env.example .env          # fill in OPENAI_API_KEY; leave LANGFUSE_* blank for offline dev
 
-# Env vars
-cp .env.example .env
-# → edit .env with your keys
-
-# Run
-docker-compose up --build
+docker-compose -f docker-compose.v2.yml up --build
+# API:       http://localhost:8000
+# Swagger:   http://localhost:8000/docs
+# Postgres:  localhost:5432
+# Redis:     localhost:6379
+# Qdrant:    http://localhost:6333
 ```
 
-Once running:
-- API: http://localhost:8000
-- Swagger UI: http://localhost:8000/docs
+The worker and API share one image; docker-compose overrides the default `uvicorn` command with `rq worker default` for the worker service.
 
 ---
 
-## 🧪 Tests
+## Tests
 
 ```bash
-make test            # run all tests
-make test-cov        # with coverage report
+pytest                         # full suite, ~5 seconds
+pytest --cov=app --cov-report=term-missing
 ```
 
-Status CI: ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
+**143 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor (real + mock paths), KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries. Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ, `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
 
 ---
 
-## 📐 Roadmap
+## Project layout
 
-### In progress
-- [ ] KSeF FA(3) + FA(2) dual-schema XML parser with XSD validation
-- [ ] PostgreSQL integration (async SQLAlchemy 2.0)
-- [ ] Redis + RQ worker for async invoice processing
-- [ ] Qdrant-based semantic search over historical invoices
-- [ ] Langfuse observability for LLM calls
-- [ ] Anomaly detection agent (compare new invoice to vendor history)
-- [ ] n8n orchestration layer (Gmail → FastAPI → Slack approval)
-- [ ] Docker ONNX optimization (~400MB image target)
-- [ ] GCP Cloud Run deployment + benchmark (eval framework, N=30+)
+```
+app/
+  main.py                   # FastAPI app + routes + lifespan (create_all + reindex_all)
+  config.py                 # pydantic-settings + load_dotenv for 3rd-party SDKs
+  db/
+    base.py                 # async engine + session factory + Neon URL normalisation
+    models.py               # Invoice ORM row
+    repositories/
+      invoice_repository.py # ORM ↔ domain model boundary
+    session.py              # FastAPI dependency
+  queue/
+    connection.py           # lazy Redis + RQ queue singletons
+    tasks.py                # process_pdf_invoice (PDF → text → LLM → DB → index)
+  schemas/
+    invoice.py              # ExtractedInvoice, StoredInvoice, SearchHit, SearchResponse
+    job.py                  # JobAccepted, JobStatus
+  services/
+    pdf_text_extractor.py   # pdfplumber + OCR fallback
+    invoice_extractor.py    # OpenAI Structured Outputs, Langfuse-instrumented
+    ksef_parser.py          # dual-schema FA(2) + FA(3) XML → ExtractedInvoice
+    embedder.py             # SentenceTransformer lazy singleton
+    vector_store.py         # Qdrant wrapper + index_invoice + reindex_all
 
-### Currently shipped
-- [x] FastAPI skeleton with `POST /invoices` endpoint
-- [x] File validation (Content-Type, size limits)
-- [x] Docker + docker-compose setup
-- [x] GitHub Actions CI (ruff lint + format + pytest)
+scripts/
+  deploy_cloud_run.sh       # env-loading wrapper around `gcloud run deploy --source .`
+  smoke_test_prod.sh        # curl-driven end-to-end verification of a live revision
 
----
+docs/
+  dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
+  langfuse_*.png            # observability screenshots (Hobby tier has 30-day retention)
 
-## 🔧 Makefile commands
-
-```bash
-make help         # list commands
-make dev          # run locally (without Docker)
-make up           # docker-compose up
-make down         # docker-compose down
-make logs         # tail logs
-make test         # run tests
-make lint         # ruff check
-make format       # ruff format
-make clean        # clean caches
+tests/                      # 143 tests, hermetic, ~5 s
 ```
 
 ---
 
-## 👤 Author
+## Author
 
-**Tatiana Golińska** — Workflow Automation Engineer | Python + AI Integration
-
-- 💼 [LinkedIn](https://www.linkedin.com/in/tatiana-golinska/)
-- 📧 tatiana.golinska@gmail.com
+**Tatiana Golińska** — Workflow Automation Engineer (n8n, Python, AI integration)
+[LinkedIn](https://www.linkedin.com/in/tatiana-golinska/) · tatiana.golinska@gmail.com
 
 ---
 
-## 📄 License
+## License
 
 MIT
