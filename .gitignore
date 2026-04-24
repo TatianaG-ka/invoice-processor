@@ -120,6 +120,8 @@ tmp/
 !tests/fixtures/*.xml
 !docs/diagrams/*.png
 !docs/dane_testowe/*.pdf
+# Langfuse screenshots — observability evidence referenced from README
+!docs/langfuse_*.png
 
 # ============================================
 # Manual smoke tests (konsumują real API credits, per-dev tools)

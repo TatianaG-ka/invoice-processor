@@ -14,7 +14,15 @@ Dzięki pydantic-settings otrzymujesz:
 - Error messages jeśli brakuje zmiennej
 """
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Propagate ``.env`` into ``os.environ`` so third-party SDKs that read
+# directly from the process environment (Langfuse, OpenAI official
+# client) pick up the same values that pydantic-settings loads into
+# ``settings`` below. pydantic-settings reads the file itself, but
+# into its own model — it does not export into ``os.environ``.
+load_dotenv()
 
 
 class Settings(BaseSettings):
