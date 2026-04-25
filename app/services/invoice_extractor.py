@@ -67,7 +67,8 @@ Otrzymasz tekst faktury (polski lub angielski). Zwróć dane w strukturze JSON z
 z dostarczonym schematem.
 
 Zasady:
-- Kwoty zawsze jako liczby (float), bez separatorów tysięcznych, kropka jako separator dziesiętny.
+- Kwoty zawsze jako stringi (np. "123.45"), bez separatorów tysięcznych, kropka jako separator dziesiętny.
+  Stringi zachowują pełną precyzję — nie konwertuj na liczby.
 - Daty w formacie ISO-8601 (YYYY-MM-DD). Jeśli data nieznana → null.
 - NIP: tylko cyfry, bez myślników i prefiksu "PL". Jeśli brak NIP → null.
 - line_items: jeśli pozycje nie są jawnie wyszczególnione w tekście, zwróć pustą listę.

@@ -61,12 +61,12 @@ def _sample_wire_payload() -> LLMInvoiceResponse:
         line_items=[
             _LLMLineItem(
                 description="Usługa konsultingowa",
-                quantity=2.0,
-                unit_price=500.0,
-                total=1000.0,
+                quantity="2.00",
+                unit_price="500.00",
+                total="1000.00",
             ),
         ],
-        totals=_LLMTotals(net=1000.0, vat=230.0, gross=1230.0, currency="PLN"),
+        totals=_LLMTotals(net="1000.00", vat="230.00", gross="1230.00", currency="PLN"),
     )
 
 
@@ -123,15 +123,15 @@ def test_extract_invoice_mock_mode_returns_stub(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_from_llm_response_converts_floats_to_decimal():
+def test_from_llm_response_converts_strings_to_decimal():
     wire = _sample_wire_payload()
     domain = from_llm_response(wire)
 
     assert isinstance(domain, ExtractedInvoice)
-    assert domain.totals.net == Decimal("1000")
-    assert domain.totals.vat == Decimal("230")
-    assert domain.totals.gross == Decimal("1230")
-    # All three must actually be Decimal, not float.
+    assert domain.totals.net == Decimal("1000.00")
+    assert domain.totals.vat == Decimal("230.00")
+    assert domain.totals.gross == Decimal("1230.00")
+    # All three must actually be Decimal, not str/float.
     assert isinstance(domain.totals.net, Decimal)
     assert isinstance(domain.totals.gross, Decimal)
     assert isinstance(domain.line_items[0].total, Decimal)
@@ -194,7 +194,7 @@ def test_extract_invoice_real_mode_happy_path(monkeypatch):
     invoice = extract_invoice("Faktura VAT nr FV/2026/04/001")
     assert invoice.invoice_number == "FV/2026/04/001"
     assert invoice.seller.nip == "1234567890"
-    assert invoice.totals.gross == Decimal("1230")
+    assert invoice.totals.gross == Decimal("1230.00")
     assert invoice.issue_date == date(2026, 4, 23)
 
 

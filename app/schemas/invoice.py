@@ -8,9 +8,12 @@ Two layers of models live here:
   application (DB layer in Phase 3, KSeF parser in Phase 4, Qdrant
   indexer in Phase 6) consumes.
 * **Wire models** (the ``_LLM*`` classes) mirror the domain structure
-  but use primitive types (``float``, ``str``) because OpenAI's
-  Structured Outputs strict mode does not accept ``Decimal``,
-  ``datetime.date`` or default values. They are an internal detail of
+  but use ``str`` for monetary fields because OpenAI's Structured
+  Outputs strict mode does not accept ``Decimal`` and ``float`` would
+  introduce binary-precision drift on round-trip serialisation.
+  Strings round-trip through :func:`_to_decimal` losslessly. The wire
+  models also use ``str`` for dates and skip default values — both
+  hard constraints of strict mode. They are an internal detail of
   :mod:`app.services.invoice_extractor` and never leave it.
 
 :func:`from_llm_response` bridges the two: LLM returns a wire model, we
@@ -104,7 +107,10 @@ class ExtractedInvoice(BaseModel):
 # ---------------------------------------------------------------------------
 #
 # OpenAI Structured Outputs (strict mode) constraints we accommodate here:
-#   * No ``Decimal`` — we use ``float`` and convert after the fact.
+#   * No ``Decimal`` — we use ``str`` for monetary fields and parse
+#     server-side with :func:`_to_decimal`. ``float`` would technically
+#     round-trip for typical 2-decimal money but loses precision on
+#     binary-unrepresentable values (a fintech-conversation foot-gun).
 #   * No ``datetime.date`` — we use ``str`` in ISO-8601 (``YYYY-MM-DD``).
 #   * No default values — every field must be required, nullability
 #     expressed via ``X | None``. Empty strings/lists stand in for
@@ -121,15 +127,15 @@ class _LLMParty(BaseModel):
 
 class _LLMLineItem(BaseModel):
     description: str
-    quantity: float
-    unit_price: float
-    total: float
+    quantity: str
+    unit_price: str
+    total: str
 
 
 class _LLMTotals(BaseModel):
-    net: float
-    vat: float
-    gross: float
+    net: str
+    vat: str
+    gross: str
     currency: str
 
 
@@ -194,7 +200,8 @@ class SearchResponse(BaseModel):
 def from_llm_response(payload: LLMInvoiceResponse) -> ExtractedInvoice:
     """Convert a wire-format LLM response into a domain model.
 
-    Float money values become :class:`Decimal`; ISO-8601 strings become
+    String money values become :class:`Decimal` via the ``Money``
+    annotation's ``BeforeValidator``; ISO-8601 strings become
     :class:`datetime.date`. An empty or malformed date string maps to
     ``None`` rather than raising — the LLM sometimes returns
     ``"nieznana"`` for missing data.
