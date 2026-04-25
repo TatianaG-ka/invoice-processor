@@ -2,27 +2,22 @@
 
 The service accepts the raw text yielded by
 :func:`app.services.pdf_text_extractor.extract_text` and returns a
-strongly-typed :class:`~app.schemas.invoice.ExtractedInvoice`.
-
-Two modes coexist:
-
-* **Real mode** — calls OpenAI with Structured Outputs (strict JSON
-  schema). Active whenever an API key is configured and
-  ``EXTRACTOR_STRATEGY`` is ``"openai"``.
-* **Mock mode** — returns a deterministic stub. Active whenever the
-  API key is blank or the strategy is ``"mock"``. This keeps CI
-  green without a secret and lets the rest of the pipeline (DB,
-  Qdrant, endpoints) be developed against a stable payload.
+strongly-typed :class:`~app.schemas.invoice.ExtractedInvoice` by
+calling OpenAI with Structured Outputs (strict JSON schema).
 
 Retry policy: transient OpenAI errors are retried up to three times
 with exponential backoff (``tenacity``). Any non-transient failure is
 surfaced as :class:`InvoiceExtractionError`.
+
+Tests that need a deterministic invoice payload without hitting
+OpenAI patch :func:`extract_invoice` directly via the
+``force_mock_extractor`` conftest fixture; there is no production
+"mock mode" toggle here.
 """
 
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
 from langfuse.decorators import langfuse_context, observe
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
@@ -31,10 +26,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from app.config import settings
 from app.schemas.invoice import (
     ExtractedInvoice,
-    LineItem,
     LLMInvoiceResponse,
-    Party,
-    Totals,
     from_llm_response,
 )
 
@@ -84,9 +76,10 @@ def _get_client() -> OpenAI:
     """Return a cached OpenAI client.
 
     Raises:
-        InvoiceExtractionError: If no API key is configured. Callers
-            should check :func:`_should_use_mock` first rather than
-            rely on catching this.
+        InvoiceExtractionError: If no API key is configured. The
+            extractor has no fallback behaviour — callers either set
+            ``OPENAI_API_KEY`` or patch :func:`extract_invoice` in
+            tests.
     """
     global _client
     if _client is None:
@@ -96,48 +89,6 @@ def _get_client() -> OpenAI:
             )
         _client = OpenAI(api_key=settings.OPENAI_API_KEY)
     return _client
-
-
-def _should_use_mock() -> bool:
-    """Decide whether to bypass OpenAI and return a stub.
-
-    Triggered by either an explicit strategy (``"mock"``) or the
-    absence of an API key (protects CI where the secret is unset).
-    """
-    strategy = settings.EXTRACTOR_STRATEGY.lower()
-    if strategy == "mock":
-        return True
-    return not settings.OPENAI_API_KEY
-
-
-def _mock_extraction(text: str) -> ExtractedInvoice:  # noqa: ARG001
-    """Return a deterministic stub invoice.
-
-    The payload is intentionally unrealistic — it's a CI placeholder,
-    not a silent success. The distinctive seller name
-    ``"MOCK — extractor disabled"`` makes it obvious when the mock
-    accidentally leaks into production output.
-    """
-    return ExtractedInvoice(
-        invoice_number="MOCK/0001",
-        issue_date=None,
-        seller=Party(name="MOCK — extractor disabled", nip=None, address=None),
-        buyer=Party(name="MOCK buyer", nip=None, address=None),
-        line_items=[
-            LineItem(
-                description="Mock line item",
-                quantity=Decimal("1"),
-                unit_price=Decimal("0"),
-                total=Decimal("0"),
-            )
-        ],
-        totals=Totals(
-            net=Decimal("0"),
-            vat=Decimal("0"),
-            gross=Decimal("0"),
-            currency="PLN",
-        ),
-    )
 
 
 @observe(as_type="generation", name="openai-invoice-extraction")
@@ -218,14 +169,6 @@ def extract_invoice(text: str) -> ExtractedInvoice:
     """
     if not text or not text.strip():
         raise ValueError("Cannot extract from empty text")
-
-    if _should_use_mock():
-        logger.info(
-            "Invoice extractor in MOCK mode (strategy=%s, api_key_set=%s)",
-            settings.EXTRACTOR_STRATEGY,
-            bool(settings.OPENAI_API_KEY),
-        )
-        return _mock_extraction(text)
 
     try:
         wire_payload = _call_openai(text)

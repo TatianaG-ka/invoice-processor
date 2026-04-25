@@ -41,9 +41,6 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     MAX_FILE_SIZE_MB: int = 10
 
-    # --- Extraction strategy ---
-    EXTRACTOR_STRATEGY: str = "openai"  # 'openai' or 'mock'
-
     # --- OCR ---
     OCR_LANGUAGES: str = "pol+eng"
 

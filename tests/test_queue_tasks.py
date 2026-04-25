@@ -19,12 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Invoice
 from app.db.repositories.invoice_repository import InvoiceRepository
 from app.queue.tasks import process_pdf_invoice
-from app.services import invoice_extractor
 
-
-@pytest.fixture(autouse=True)
-def force_mock_extractor(monkeypatch):
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
+pytestmark = pytest.mark.usefixtures("force_mock_extractor")
 
 
 @pytest_asyncio.fixture

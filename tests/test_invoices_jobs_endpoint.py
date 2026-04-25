@@ -11,13 +11,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import invoice_extractor
-
-
-@pytest.fixture(autouse=True)
-def force_mock_extractor(monkeypatch):
-    """Keep the LLM out of the loop — task finishes via mock stub."""
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
+pytestmark = pytest.mark.usefixtures("force_mock_extractor")
 
 
 def test_job_status_unknown_id_returns_404(client: TestClient):

@@ -22,7 +22,6 @@ services:
       - QDRANT_COLLECTION=invoices
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      - EXTRACTOR_STRATEGY=${EXTRACTOR_STRATEGY:-openai}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
@@ -50,7 +49,6 @@ services:
       - QDRANT_COLLECTION=invoices
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      - EXTRACTOR_STRATEGY=${EXTRACTOR_STRATEGY:-openai}
       - OCR_LANGUAGES=${OCR_LANGUAGES:-pol+eng}
     depends_on:
       postgres:

@@ -21,7 +21,7 @@ from typing import TypeVar
 from app.db.base import get_sessionmaker
 from app.db.repositories.invoice_repository import InvoiceRepository
 from app.schemas.invoice import ExtractedInvoice
-from app.services.invoice_extractor import extract_invoice
+from app.services import invoice_extractor
 from app.services.pdf_text_extractor import extract_text
 from app.services.vector_store import index_invoice
 
@@ -79,7 +79,7 @@ def process_pdf_invoice(pdf_bytes: bytes, filename: str | None = None) -> int:
         len(pdf_bytes),
     )
     text = extract_text(pdf_bytes)
-    invoice = extract_invoice(text)
+    invoice = invoice_extractor.extract_invoice(text)
     invoice_id = _run_coroutine_blocking(_persist(invoice))
     # Best-effort indexing after the DB commit: if Qdrant is unavailable
     # the job still succeeds and the invoice is retrievable by id —

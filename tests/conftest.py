@@ -25,6 +25,7 @@ import math
 import random
 import uuid
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from pathlib import Path
 
 import fakeredis
@@ -47,7 +48,9 @@ from app.db.session import get_db
 from app.main import app
 from app.queue import connection as queue_connection
 from app.queue.connection import queue_dependency
+from app.schemas.invoice import ExtractedInvoice, LineItem, Party, Totals
 from app.services import embedder as embedder_module
+from app.services import invoice_extractor as invoice_extractor_module
 from app.services import vector_store as vector_store_module
 from app.services.embedder import EMBEDDING_DIM
 from app.services.vector_store import VectorStore, vector_store_dependency
@@ -355,3 +358,46 @@ def ksef_fa2_bytes(ksef_dir: Path) -> bytes:
 @pytest.fixture
 def ksef_fa3_bytes(ksef_dir: Path) -> bytes:
     return _load_fixture(ksef_dir, "faktura_fa3_sample.xml")
+
+
+# ---------------------------------------------------------------------------
+# Extractor stub — replaces OpenAI in tests that exercise the full pipeline.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def force_mock_extractor(monkeypatch):
+    """Replace :func:`extract_invoice` with a deterministic stub.
+
+    Pipeline tests (POST /invoices, queue task, persistence) need a
+    successful extraction without hitting OpenAI. We patch the function
+    binding inside :mod:`app.services.invoice_extractor`; downstream
+    code (``app.queue.tasks``) reads it via the module attribute, so a
+    single patch covers every call site.
+
+    The stub seller name ``"MOCK — extractor disabled"`` makes it
+    obvious if this fixture ever leaks into a non-test environment.
+    Apply at module scope via ``pytestmark = pytest.mark.usefixtures
+    ("force_mock_extractor")`` so every test in the module gets it.
+    """
+    stub = ExtractedInvoice(
+        invoice_number="MOCK/0001",
+        issue_date=None,
+        seller=Party(name="MOCK — extractor disabled", nip=None, address=None),
+        buyer=Party(name="MOCK buyer", nip=None, address=None),
+        line_items=[
+            LineItem(
+                description="Mock line item",
+                quantity=Decimal("1"),
+                unit_price=Decimal("0"),
+                total=Decimal("0"),
+            )
+        ],
+        totals=Totals(
+            net=Decimal("0"),
+            vat=Decimal("0"),
+            gross=Decimal("0"),
+            currency="PLN",
+        ),
+    )
+    monkeypatch.setattr(invoice_extractor_module, "extract_invoice", lambda text: stub)

@@ -3,9 +3,6 @@
 Coverage map:
 
 * Input-guard behavior (empty / whitespace text).
-* Mock-mode selection logic (``_should_use_mock``) in both trigger
-  paths — missing API key and explicit strategy override.
-* ``extract_invoice`` in mock mode returns the deterministic stub.
 * Wire ⇄ domain conversion (:func:`from_llm_response`): Decimal
   coercion, ISO-date parsing, tolerant handling of garbage dates.
 * Error wrapping: transient OpenAI errors bubble up as
@@ -15,7 +12,9 @@ Coverage map:
   (3 attempts, triggered by connection/timeout/rate-limit).
 
 Real OpenAI calls are never made — every path that would reach the
-network is stubbed via ``monkeypatch``.
+network is stubbed via ``monkeypatch``. Pipeline-level tests that
+need a successful extraction without OpenAI use the
+``force_mock_extractor`` fixture from :mod:`tests.conftest`.
 """
 
 from __future__ import annotations
@@ -38,7 +37,6 @@ from app.schemas.invoice import (
 from app.services import invoice_extractor
 from app.services.invoice_extractor import (
     InvoiceExtractionError,
-    _should_use_mock,
     extract_invoice,
 )
 
@@ -83,39 +81,6 @@ def test_extract_invoice_raises_on_empty_text():
 def test_extract_invoice_raises_on_whitespace_only_text():
     with pytest.raises(ValueError, match="empty text"):
         extract_invoice("   \n\t  ")
-
-
-# ---------------------------------------------------------------------------
-# Mock-mode selection
-# ---------------------------------------------------------------------------
-
-
-def test_should_use_mock_when_api_key_missing(monkeypatch):
-    monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
-    assert _should_use_mock() is True
-
-
-def test_should_use_mock_when_strategy_is_mock(monkeypatch):
-    # Even with a real-looking key, strategy=mock forces the stub.
-    monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-looks-real")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
-    assert _should_use_mock() is True
-
-
-def test_should_not_use_mock_when_key_set_and_strategy_openai(monkeypatch):
-    monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
-    assert _should_use_mock() is False
-
-
-def test_extract_invoice_mock_mode_returns_stub(monkeypatch):
-    monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "")
-    invoice = extract_invoice("Faktura VAT nr 1/2026\nKwota: 100 PLN")
-    assert isinstance(invoice, ExtractedInvoice)
-    assert invoice.seller.name.startswith("MOCK")
-    assert invoice.invoice_number == "MOCK/0001"
-    assert invoice.totals.currency == "PLN"
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +151,6 @@ def test_money_decimal_rejects_bool():
 
 def test_extract_invoice_real_mode_happy_path(monkeypatch):
     monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
 
     wire = _sample_wire_payload()
     monkeypatch.setattr(invoice_extractor, "_call_openai", lambda text: wire)
@@ -200,7 +164,6 @@ def test_extract_invoice_real_mode_happy_path(monkeypatch):
 
 def test_extract_invoice_wraps_transient_error_as_extraction_error(monkeypatch):
     monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
 
     def raise_conn_err(text: str):
         raise APIConnectionError(
@@ -215,7 +178,6 @@ def test_extract_invoice_wraps_transient_error_as_extraction_error(monkeypatch):
 
 def test_extract_invoice_propagates_extraction_error(monkeypatch):
     monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
 
     def raise_extraction_err(text: str):
         raise InvoiceExtractionError("LLM produced no parsed payload")
@@ -229,7 +191,6 @@ def test_extract_invoice_propagates_extraction_error(monkeypatch):
 def test_extract_invoice_wraps_unexpected_error(monkeypatch):
     """Any non-transient, non-InvoiceExtractionError surfaces as InvoiceExtractionError."""
     monkeypatch.setattr(invoice_extractor.settings, "OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "openai")
 
     def raise_unexpected(text: str):
         raise RuntimeError("something unexpected")

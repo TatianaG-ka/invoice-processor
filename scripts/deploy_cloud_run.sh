@@ -92,7 +92,6 @@ gcloud run deploy "${SERVICE_NAME}" \
   --set-env-vars "LANGFUSE_HOST=${LANGFUSE_HOST}" \
   --set-env-vars "QDRANT_URL=:memory:" \
   --set-env-vars "QDRANT_COLLECTION=${QDRANT_COLLECTION}" \
-  --set-env-vars "EXTRACTOR_STRATEGY=openai" \
   --set-env-vars "ENVIRONMENT=production" \
   --set-env-vars "LOG_LEVEL=INFO"
 

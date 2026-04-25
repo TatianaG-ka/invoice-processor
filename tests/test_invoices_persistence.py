@@ -20,13 +20,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import invoice_extractor
-
-
-@pytest.fixture(autouse=True)
-def force_mock_extractor(monkeypatch):
-    """Same guard as in ``test_invoices_endpoint.py`` — CI hermetic."""
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
+pytestmark = pytest.mark.usefixtures("force_mock_extractor")
 
 
 def _post_and_wait_for_invoice_id(client: TestClient, pdf_bytes: bytes) -> int:

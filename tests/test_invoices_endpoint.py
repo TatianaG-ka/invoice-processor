@@ -8,9 +8,10 @@ already ``finished`` in fakeredis. That gives us a realistic
 202 → status=finished → stored invoice flow inside a single test
 without running a worker process.
 
-OpenAI is never called. The ``force_mock_extractor`` fixture toggles
-``EXTRACTOR_STRATEGY`` to ``"mock"`` for every test in this module, so
-CI stays hermetic and the pipeline output is deterministic.
+OpenAI is never called. The ``force_mock_extractor`` fixture (defined
+in :mod:`tests.conftest`) replaces :func:`extract_invoice` with a
+deterministic stub so CI stays hermetic and the pipeline output is
+predictable.
 """
 
 from __future__ import annotations
@@ -18,18 +19,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.services import invoice_extractor
-
-
-@pytest.fixture(autouse=True)
-def force_mock_extractor(monkeypatch):
-    """Force the extractor into mock mode for every test in this file.
-
-    Protects CI where ``OPENAI_API_KEY`` is absent, and protects local
-    runs where the key *is* set — we never want the test suite to hit
-    the network.
-    """
-    monkeypatch.setattr(invoice_extractor.settings, "EXTRACTOR_STRATEGY", "mock")
+pytestmark = pytest.mark.usefixtures("force_mock_extractor")
 
 
 # ---------------------------------------------------------------------------
