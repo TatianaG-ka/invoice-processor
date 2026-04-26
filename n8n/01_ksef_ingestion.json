@@ -1,0 +1,420 @@
+{
+  "name": "01 KSeF Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Schedule Trigger (every 30 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Synthetic FA(3) invoices for the demo pipeline.\n// Real implementation would call POST /api/v2/invoices/query/metadata\n// against api-test.ksef.mf.gov.pl and stream results here. All NIPs\n// are checksum-invalid; counterparty names are fabricated.\n\nconst NS = 'http://crd.gov.pl/wzor/2025/06/25/13775/';\n\nfunction buildInvoice({ number, issueDate, sellerNip, sellerName, buyerNip, buyerName, description, net, vatRate }) {\n  const vat = +(net * (vatRate / 100)).toFixed(2);\n  const gross = +(net + vat).toFixed(2);\n  return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Faktura xmlns=\"${NS}\">\n  <Naglowek>\n    <KodFormularza kodSystemowy=\"FA (3)\" wersjaSchemy=\"1-0E\">FA</KodFormularza>\n    <WariantFormularza>3</WariantFormularza>\n    <DataWytworzeniaFa>${issueDate}T10:00:00Z</DataWytworzeniaFa>\n    <SystemInfo>n8n KSeF Ingestion Demo</SystemInfo>\n  </Naglowek>\n  <Podmiot1>\n    <DaneIdentyfikacyjne>\n      <NIP>${sellerNip}</NIP>\n      <Nazwa>${sellerName}</Nazwa>\n    </DaneIdentyfikacyjne>\n    <Adres>\n      <KodKraju>PL</KodKraju>\n      <AdresL1>ul. Testowa 1</AdresL1>\n      <AdresL2>00-001 Warszawa</AdresL2>\n    </Adres>\n  </Podmiot1>\n  <Podmiot2>\n    <DaneIdentyfikacyjne>\n      <NIP>${buyerNip}</NIP>\n      <Nazwa>${buyerName}</Nazwa>\n    </DaneIdentyfikacyjne>\n    <Adres>\n      <KodKraju>PL</KodKraju>\n      <AdresL1>al. Klienta 99</AdresL1>\n      <AdresL2>00-002 Warszawa</AdresL2>\n    </Adres>\n  </Podmiot2>\n  <Fa>\n    <KodWaluty>PLN</KodWaluty>\n    <P_1>${issueDate}</P_1>\n    <P_2>${number}</P_2>\n    <P_13_1>${net.toFixed(2)}</P_13_1>\n    <P_14_1>${vat.toFixed(2)}</P_14_1>\n    <P_15>${gross.toFixed(2)}</P_15>\n    <FaWiersz>\n      <NrWierszaFa>1</NrWierszaFa>\n      <P_7>${description}</P_7>\n      <P_8A>szt</P_8A>\n      <P_8B>1</P_8B>\n      <P_9A>${net.toFixed(2)}</P_9A>\n      <P_11>${net.toFixed(2)}</P_11>\n      <P_12>${vatRate}</P_12>\n    </FaWiersz>\n  </Fa>\n</Faktura>`;\n}\n\nconst samples = [\n  { number: 'FV/IT/001/2026', issueDate: '2026-03-05', sellerNip: '0000000000', sellerName: 'CodeForge Sp. z o.o.', buyerNip: '1111111111', buyerName: 'Klient Premium Sp. z o.o.', description: 'Konsulting wdrozenia mikroserwisow', net: 8500.00, vatRate: 23 },\n  { number: 'FV/SaaS/042/2026', issueDate: '2026-03-12', sellerNip: '2222222222', sellerName: 'CloudPilot Polska Sp. z o.o.', buyerNip: '1111111111', buyerName: 'Klient Premium Sp. z o.o.', description: 'Subskrypcja SaaS - plan Enterprise', net: 350.00, vatRate: 23 },\n  { number: 'FV/MKT/077/2026', issueDate: '2026-03-18', sellerNip: '3333333333', sellerName: 'BrandLab Studio Sp. z o.o.', buyerNip: '1111111111', buyerName: 'Klient Premium Sp. z o.o.', description: 'Kampania marketingowa Q1 2026', net: 15000.00, vatRate: 23 },\n  { number: 'FV/BIU/103/2026', issueDate: '2026-03-22', sellerNip: '4444444444', sellerName: 'OfficeWorld Sp. z o.o.', buyerNip: '1111111111', buyerName: 'Klient Premium Sp. z o.o.', description: 'Sprzet biurowy - dostawa marzec', net: 1200.00, vatRate: 23 },\n  { number: 'FV/HW/255/2026', issueDate: '2026-03-28', sellerNip: '5555555555', sellerName: 'TechSupply Distribution Sp. z o.o.', buyerNip: '1111111111', buyerName: 'Klient Premium Sp. z o.o.', description: 'Stacje robocze x10 + monitory', net: 42500.00, vatRate: 23 }\n];\n\nreturn samples.map((s, idx) => {\n  const xml = buildInvoice(s);\n  return {\n    json: {\n      filename: `${s.number.replace(/\\//g, '_')}.xml`,\n      sellerNip: s.sellerNip,\n      invoiceNumber: s.number,\n      issueDate: s.issueDate\n    },\n    binary: {\n      file: {\n        data: Buffer.from(xml, 'utf-8').toString('base64'),\n        mimeType: 'application/xml',\n        fileName: `${s.number.replace(/\\//g, '_')}.xml`,\n        fileExtension: 'xml'\n      }\n    }\n  };\n});\n"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Load 5 Sample FA(3) Invoices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "Loop Over Invoices",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://invoice-processor-510066601703.europe-central2.run.app/invoices/ksef",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "name": "POST /invoices/ksef",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        416
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 201,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "name": "If 201 Created",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asn-1",
+              "name": "invoiceId",
+              "value": "={{ $json.body.id }}",
+              "type": "number"
+            },
+            {
+              "id": "asn-2",
+              "name": "vendorNip",
+              "value": "={{ $json.body.seller_nip || $('Loop Over Invoices').item.json.sellerNip }}",
+              "type": "string"
+            },
+            {
+              "id": "asn-3",
+              "name": "amountGross",
+              "value": "={{ $json.body.totals.gross }}",
+              "type": "number"
+            },
+            {
+              "id": "asn-4",
+              "name": "invoiceNumber",
+              "value": "={{ $('Loop Over Invoices').item.json.invoiceNumber }}",
+              "type": "string"
+            },
+            {
+              "id": "asn-5",
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000006",
+      "name": "Extract Result Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "invoice-pipeline-demo",
+          "mode": "name"
+        },
+        "text": "=:white_check_mark: Invoice *{{ $json.invoiceNumber }}* (id={{ $json.invoiceId }}) from NIP `{{ $json.vendorNip }}` indexed — *{{ $json.amountGross }} PLN*",
+        "otherOptions": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000007",
+      "name": "Slack: success",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        192
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "REPLACE_WITH_SLACK_CRED_ID",
+          "name": "Slack — invoice-pipeline-demo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "processed_invoices",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "indexed",
+            "invoice_id": "={{ $('Extract Result Fields').item.json.invoiceId }}",
+            "invoice_number": "={{ $('Extract Result Fields').item.json.invoiceNumber }}",
+            "vendor_nip": "={{ $('Extract Result Fields').item.json.vendorNip }}",
+            "amount_gross_pln": "={{ $('Extract Result Fields').item.json.amountGross }}",
+            "timestamp": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_id",
+              "displayName": "invoice_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vendor_nip",
+              "displayName": "vendor_nip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "amount_gross_pln",
+              "displayName": "amount_gross_pln",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000008",
+      "name": "Sheets: append success row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CRED_ID",
+          "name": "Google Sheets — KSeF Pipeline Demo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "errorMessage": "=invoice-processor returned status {{ $json.statusCode }}: {{ JSON.stringify($json.body).slice(0, 300) }}"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000009",
+      "name": "Throw on non-201",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        432
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (every 30 min)": {
+      "main": [
+        [
+          {
+            "node": "Load 5 Sample FA(3) Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load 5 Sample FA(3) Invoices": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Invoices": {
+      "main": [
+        [],
+        [
+          {
+            "node": "POST /invoices/ksef",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /invoices/ksef": {
+      "main": [
+        [
+          {
+            "node": "If 201 Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If 201 Created": {
+      "main": [
+        [
+          {
+            "node": "Extract Result Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Throw on non-201",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Result Fields": {
+      "main": [
+        [
+          {
+            "node": "Slack: success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: success": {
+      "main": [
+        [
+          {
+            "node": "Sheets: append success row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: append success row": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "mivPsfJ2HLE1g2k4",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "6cde92fd-b1d1-41e5-a2f2-ff55f215647c",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "01-ksef-ingestion",
+  "tags": []
+}

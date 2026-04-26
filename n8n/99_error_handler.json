@@ -1,0 +1,244 @@
+{
+  "name": "99 Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "err-0001-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "e2",
+              "name": "workflow_name",
+              "value": "={{ $json.workflow.name }}",
+              "type": "string"
+            },
+            {
+              "id": "e3",
+              "name": "workflow_id",
+              "value": "={{ $json.workflow.id }}",
+              "type": "string"
+            },
+            {
+              "id": "e4",
+              "name": "execution_id",
+              "value": "={{ $json.execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "e5",
+              "name": "failed_node",
+              "value": "={{ $json.execution.lastNodeExecuted }}",
+              "type": "string"
+            },
+            {
+              "id": "e6",
+              "name": "error_message",
+              "value": "={{ $json.execution.error.message }}",
+              "type": "string"
+            },
+            {
+              "id": "e7",
+              "name": "error_excerpt",
+              "value": "={{ JSON.stringify($json.execution.error || {}).slice(0, 500) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "err-0001-4000-8000-000000000002",
+      "name": "Extract Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow": "={{ $json.workflow_name }}",
+            "execution_id": "={{ $json.execution_id }}",
+            "failed_node": "={{ $json.failed_node }}",
+            "error_message": "={{ $json.error_message }}",
+            "payload_excerpt": "={{ $json.error_excerpt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload_excerpt",
+              "displayName": "payload_excerpt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "err-0001-4000-8000-000000000003",
+      "name": "Sheets: log incident",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        688,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_SHEETS_CRED_ID",
+          "name": "Google Sheets — KSeF Pipeline Demo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#invoice-pipeline-demo",
+          "mode": "name"
+        },
+        "text": "=:rotating_light: *KSeF ingestion failed* in `{{ $json.workflow_name }}`\nNode: `{{ $json.failed_node }}`\nError: ```{{ $json.error_message }}```\nExecution: `{{ $json.execution_id }}`",
+        "otherOptions": {}
+      },
+      "id": "err-0001-4000-8000-000000000004",
+      "name": "Slack: alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        688,
+        400
+      ],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "REPLACE_WITH_SLACK_CRED_ID",
+          "name": "Slack — invoice-pipeline-demo"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Error Context": {
+      "main": [
+        [
+          {
+            "node": "Sheets: log incident",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack: alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "963a709c-b9e6-4c87-a1cf-de7c01ceb764",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "99-error-handler",
+  "tags": []
+}
