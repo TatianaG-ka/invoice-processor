@@ -63,7 +63,7 @@ flowchart LR
 | LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.0003/call |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
 | Observability | Langfuse Cloud | `@observe` on OpenAI call, token/cost tracking |
-| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 143 tests, ~5 s full run |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 139 tests, ~5 s full run |
 | CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
 | Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
@@ -176,7 +176,7 @@ pytest                         # full suite, ~5 seconds
 pytest --cov=app --cov-report=term-missing
 ```
 
-**143 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor (real + mock paths), KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries. Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ, `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
+**139 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries. Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ, `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
 
 ---
 
@@ -213,7 +213,7 @@ docs/
   dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
   langfuse_*.png            # observability screenshots (Hobby tier has 30-day retention)
 
-tests/                      # 143 tests, hermetic, ~5 s
+tests/                      # 139 tests, hermetic, ~5 s
 ```
 
 ---
