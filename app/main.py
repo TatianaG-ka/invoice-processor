@@ -38,9 +38,15 @@ from app.db.repositories.invoice_repository import (
 from app.db.session import get_db
 from app.queue.connection import queue_dependency
 from app.queue.tasks import process_pdf_invoice
+from app.schemas.category import CategorizationResult
 from app.schemas.invoice import SearchHit, SearchResponse, StoredInvoice
 from app.schemas.job import JobAccepted, JobStatus
 from app.services import embedder, idempotency
+from app.services.invoice_categorizer import (
+    InvoiceCategorizationError,
+    InvoiceNotFoundError,
+    categorize_invoice,
+)
 from app.services.ksef_parser import KSeFParseError, parse_ksef
 from app.services.vector_store import (
     VectorStore,
@@ -314,6 +320,46 @@ async def search_invoices(
         raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
 
     return SearchResponse(query=q, results=results)
+
+
+@app.post(
+    "/invoices/{invoice_id}/categorize",
+    response_model=CategorizationResult,
+    tags=["Invoices"],
+)
+async def categorize_invoice_endpoint(
+    invoice_id: int,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    store: Annotated[VectorStore, Depends(vector_store_dependency)],
+    response: Response,
+    force: bool = False,
+) -> CategorizationResult:
+    """Assign one of 12 ``InvoiceCategory`` values to a stored invoice.
+
+    Idempotent (ADR-007): the first call performs an LLM-driven RAG
+    categorization (``201 Created``); subsequent calls return the
+    cached row (``200 OK``) until ``?force=true`` triggers a fresh
+    LLM call. Mirrors the 201/200 flip used by ADR-006 idempotency
+    on ``POST /invoices/ksef``.
+
+    Wraps :class:`InvoiceNotFoundError` to ``404`` and any
+    :class:`SQLAlchemyError` to ``503`` so the contract matches the
+    rest of the surface (no DB stack traces ever reach the wire).
+    """
+    try:
+        result, was_fresh = await categorize_invoice(
+            invoice_id, session=session, store=store, force=force
+        )
+    except InvoiceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvoiceCategorizationError as exc:
+        raise HTTPException(status_code=502, detail=f"Categorization failed: {exc}") from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
+
+    if was_fresh:
+        response.status_code = 201
+    return result
 
 
 @app.get(

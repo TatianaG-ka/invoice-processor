@@ -64,6 +64,12 @@ class Invoice(Base):
 
     line_items: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
 
+    # ADR-007: persisted LLM categorization. NULL until first
+    # POST /invoices/{id}/categorize call. Re-categorization with
+    # ?force=true overwrites in place.
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    category_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

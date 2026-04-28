@@ -59,6 +59,34 @@ class InvoiceRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def update_category(
+        self,
+        invoice_id: int,
+        category: str,
+        confidence: float,
+    ) -> Invoice | None:
+        """Persist a categorization onto an existing invoice row.
+
+        Returns the refreshed row, or ``None`` if the id does not
+        exist (the route translates that to a 404). ``confidence`` is
+        stored as ``Numeric(4, 3)`` — three decimals are plenty for
+        an illustrative confidence; SQLAlchemy handles float→Decimal.
+        """
+        row = await self._session.get(Invoice, invoice_id)
+        if row is None:
+            return None
+        row.category = category
+        row.category_confidence = confidence
+        await self._session.commit()
+        await self._session.refresh(row)
+        logger.info(
+            "Categorized invoice id=%d as %r (confidence=%.3f)",
+            invoice_id,
+            category,
+            confidence,
+        )
+        return row
+
 
 def orm_to_stored_invoice(row: Invoice) -> StoredInvoice:
     """Build a :class:`StoredInvoice` from an :class:`Invoice` ORM row.
