@@ -121,6 +121,8 @@ tmp/
 !docs/dane_testowe/*.pdf
 # Langfuse screenshots — observability evidence referenced from README
 !docs/langfuse_*.png
+# Idempotency smoke-test screenshot — referenced from README live-demo section
+!docs/idempotency_*.png
 
 # ============================================
 # Manual smoke tests (consume real API credits, per-dev tooling)
