@@ -5,7 +5,8 @@
   All NIPs are checksum-invalid (0000000000, 1111111111). Addresses
   and counterparty names are fabricated.
 
-  Schema: FA(3) — current namespace, mandatory from 2026-02-01.
+  Schema: FA(3) — current namespace; mandatory for large taxpayers
+  from 2026-02-01, universal B2B from 2026-04-01.
   Reference: https://www.podatki.gov.pl/ksef/
 -->
 <Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">

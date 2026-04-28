@@ -11,7 +11,7 @@
 
 ## What it does
 
-Polish businesses receive 60–100 invoices per month across three shapes: scanned PDFs, text-layer PDFs, and — as of **February 2026** — KSeF XML (legally mandatory for large companies). This service normalises all of them into one typed record and surfaces two things that matter downstream:
+Polish businesses receive 60–100 invoices per month across three shapes: scanned PDFs, text-layer PDFs, and — from **April 2026**, mandatory for virtually every B2B business in Poland (large taxpayers above PLN 200M revenue went live in February 2026) — KSeF XML. This service normalises all of them into one typed record and surfaces two things that matter downstream:
 
 1. **Structured fields** behind `GET /invoices/{id}` — seller, buyer, line items, totals, dates — all in a consistent JSON shape regardless of ingestion path.
 2. **Semantic retrieval** behind `GET /invoices/search?q=...` — cosine similarity over sentence embeddings of seller name + line-item descriptions, so "find invoices about printer toner" works without exact-string matching.
@@ -151,7 +151,7 @@ The service degrades gracefully when Langfuse keys are absent: the decorator see
 **Consequence:** No migration file to maintain, but also no schema-change safety net. Revisit if the row count grows past the demo's "hundreds" bound or if multiple instances need coordinated DDL.
 
 ### ADR-003 — Dual KSeF schema (FA(2) legacy + FA(3) current)
-**Context:** The Polish Ministry of Finance rolled out FA(3) (`http://crd.gov.pl/wzor/2025/06/25/13775/`) as the mandatory format for large companies from **February 2026**, but FA(2) documents will continue to exist in archives and email traffic for years.
+**Context:** The Polish Ministry of Finance rolled out FA(3) (`http://crd.gov.pl/wzor/2025/06/25/13775/`) as the mandatory format for large taxpayers (>PLN 200M revenue) from **February 2026**, with the universal B2B obligation following in **April 2026**. FA(2) documents will continue to exist in archives and email traffic for years.
 **Decision:** `parse_ksef()` sniffs the root namespace and dispatches to one of two parsers. Both produce the same `ExtractedInvoice` domain model, so no downstream code knows which shape arrived.
 **Consequence:** Ingestion accepts both shapes today; dropping FA(2) later is a one-function delete.
 

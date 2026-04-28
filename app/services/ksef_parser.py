@@ -4,10 +4,11 @@ KSeF (Krajowy System e-Faktur) is the Polish national e-invoicing
 system. Two XSD schema versions are currently in use:
 
 * **FA(2)** — legacy namespace ``http://crd.gov.pl/wzor/2023/06/29/12648/``.
-  In use for invoices issued before 2026-02-01 and for voluntary KSeF
-  adopters during the transition period.
+  In use for invoices issued before the FA(3) cut-over and for voluntary
+  KSeF adopters during the transition period.
 * **FA(3)** — current namespace ``http://crd.gov.pl/wzor/2025/06/25/13775/``.
-  Mandatory for all VAT-registered taxpayers from 2026-02-01.
+  Mandatory for large taxpayers (>PLN 200M revenue) from 2026-02-01;
+  universal B2B obligation follows on 2026-04-01.
 
 The public entry point :func:`parse_ksef` detects the schema via the
 document root's namespace and dispatches to the matching parser. The
