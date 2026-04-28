@@ -23,7 +23,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
 from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
@@ -40,7 +40,7 @@ from app.queue.connection import queue_dependency
 from app.queue.tasks import process_pdf_invoice
 from app.schemas.invoice import SearchHit, SearchResponse, StoredInvoice
 from app.schemas.job import JobAccepted, JobStatus
-from app.services import embedder
+from app.services import embedder, idempotency
 from app.services.ksef_parser import KSeFParseError, parse_ksef
 from app.services.vector_store import (
     VectorStore,
@@ -197,9 +197,17 @@ def get_job_status(
 )
 async def upload_ksef_invoice(
     file: Annotated[UploadFile, File()],
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StoredInvoice:
-    """Accept a KSeF XML invoice (FA(2) or FA(3)), persist, return stored."""
+    """Accept a KSeF XML invoice (FA(2) or FA(3)), persist, return stored.
+
+    Idempotent on ``(seller_nip, invoice_number)``: a retried POST of
+    the same invoice within 24h returns the originally stored record
+    with HTTP 200 instead of creating a duplicate row. Backed by Redis
+    (Upstash in production, fakeredis in tests). Redis outages degrade
+    gracefully to "no dedup", not "no service".
+    """
     if file.content_type not in KSEF_CONTENT_TYPES:
         raise HTTPException(
             status_code=415,
@@ -222,10 +230,36 @@ async def upload_ksef_invoice(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     repo = InvoiceRepository(session)
+
+    # Idempotency: same (seller_nip, invoice_number) within 24h returns
+    # the previously-stored row. Skipped when the parse did not yield
+    # both fields (rare for KSeF — both are mandatory in FA(3) — but
+    # defensive against partial FA(2) documents).
+    dedup_key: str | None = None
+    if invoice.seller.nip and invoice.invoice_number:
+        dedup_key = idempotency.ksef_key(invoice.seller.nip, invoice.invoice_number)
+        cached_id = await idempotency.find_existing(dedup_key)
+        if cached_id is not None:
+            try:
+                cached_row = await repo.get_by_id(cached_id)
+            except SQLAlchemyError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database temporarily unavailable.",
+                ) from exc
+            if cached_row is not None:
+                response.status_code = 200
+                return orm_to_stored_invoice(cached_row)
+            # Stale claim (row deleted out-of-band) — fall through to a
+            # fresh save and overwrite the key below.
+
     try:
         saved = await repo.save(invoice)
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
+
+    if dedup_key is not None:
+        await idempotency.claim(dedup_key, saved.id)
     # Best-effort indexing: a Qdrant outage must not block a successful
     # parse + persist. Same contract as the PDF/queue path.
     index_invoice(saved.id, invoice)

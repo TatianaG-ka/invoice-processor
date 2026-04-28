@@ -63,7 +63,7 @@ flowchart LR
 | LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.0003/call |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
 | Observability | Langfuse Cloud | `@observe` on OpenAI call, token/cost tracking |
-| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 139 tests, ~5 s full run |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 148 tests, ~5 s full run |
 | CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
 | Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
@@ -165,6 +165,11 @@ The service degrades gracefully when Langfuse keys are absent: the decorator see
 **Decision:** The repository `save` is on the critical path — a `SQLAlchemyError` propagates as `503`. `index_invoice` is wrapped in `try/except Exception → log + return False`: a broken embedder or a Qdrant outage degrades search coverage but never breaks the write path.
 **Consequence:** The DB is the source of truth; the vector store is a secondary projection that can always be rebuilt. Matches the reindex-on-startup contract from ADR-004.
 
+### ADR-006 — Redis idempotency on `POST /invoices/ksef`
+**Context:** KSeF invoices arrive in bursts (n8n batches, retried HTTP timeouts). A retried POST of the same invoice should not parse and persist twice — that would double-count totals in downstream registers and double-fire Slack alerts.
+**Decision:** Before parsing, hash the request to a `(seller_nip, invoice_number)` pair (Polish tax law guarantees this is unique per invoice forever) and `GET` the key from a managed Redis (Upstash in production, fakeredis under tests). Hit → return the originally-stored row with `200 OK` and the same `id`. Miss → save, then `SET key=invoice_id EX 86400` so the next 24h of retries are no-ops. A separate `IDEMPOTENCY_REDIS_URL` keeps this keyspace independent of the queue's Redis.
+**Consequence:** `201 Created` (first time) and `200 OK` (cached) are both happy responses; consumers don't have to special-case status. Best-effort by design — a Redis outage logs a warning and falls through to a normal save (worse latency, possible duplicates during the outage window, but no failed requests). Tests cover both the cached-hit path and the Redis-outage fallthrough.
+
 ---
 
 ## Local development
@@ -193,7 +198,7 @@ pytest                         # full suite, ~5 seconds
 pytest --cov=app --cov-report=term-missing
 ```
 
-**139 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries. Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ, `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
+**148 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries, **Redis idempotency layer** (incl. retry-deduplication contract + Redis-outage fallthrough). Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ (sync API for the queue, async API for idempotency), `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
 
 ---
 
@@ -230,7 +235,7 @@ docs/
   dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
   langfuse_*.png            # observability screenshots (Hobby tier has 30-day retention)
 
-tests/                      # 139 tests, hermetic, ~5 s
+tests/                      # 148 tests, hermetic, ~5 s
 ```
 
 ---

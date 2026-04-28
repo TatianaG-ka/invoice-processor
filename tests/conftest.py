@@ -50,6 +50,7 @@ from app.queue import connection as queue_connection
 from app.queue.connection import queue_dependency
 from app.schemas.invoice import ExtractedInvoice, LineItem, Party, Totals
 from app.services import embedder as embedder_module
+from app.services import idempotency as idempotency_module
 from app.services import invoice_extractor as invoice_extractor_module
 from app.services import vector_store as vector_store_module
 from app.services.embedder import EMBEDDING_DIM
@@ -178,6 +179,42 @@ def _override_queue(test_queue: Queue, monkeypatch):
         yield
     finally:
         app.dependency_overrides.pop(queue_dependency, None)
+
+
+# ---------------------------------------------------------------------------
+# Idempotency fixtures — fakeredis async client (Phase 7+).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_async_redis():
+    """Per-test fakeredis async client for the idempotency layer.
+
+    A separate FakeRedis instance per test (not shared with the RQ
+    queue's ``fake_redis``) so the idempotency keyspace cannot leak
+    into queue keyspace, mirroring the production split where
+    ``IDEMPOTENCY_REDIS_URL`` may point at a different Redis from
+    ``REDIS_URL``.
+    """
+    from fakeredis import aioredis as fake_aioredis
+
+    return fake_aioredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture(autouse=True)
+def _override_idempotency(fake_async_redis, monkeypatch):
+    """Wire the fake async Redis into the idempotency singleton.
+
+    Autouse so no test can accidentally hit a real Redis via
+    ``settings.IDEMPOTENCY_REDIS_URL`` / ``settings.REDIS_URL``. The
+    ``reset()`` call after each test drops the cached client, so a
+    later test that monkeypatches ``settings`` sees a fresh build.
+    """
+    monkeypatch.setattr(idempotency_module, "_client", fake_async_redis)
+    try:
+        yield
+    finally:
+        idempotency_module.reset()
 
 
 # ---------------------------------------------------------------------------

@@ -68,6 +68,61 @@ def test_post_ksef_then_get_by_id_roundtrip(client: TestClient, ksef_fa3_bytes: 
 
 
 # ---------------------------------------------------------------------------
+# Idempotency — duplicate POST returns 200 with the same id, no new row.
+# ---------------------------------------------------------------------------
+
+
+def test_post_ksef_duplicate_returns_200_with_same_id(
+    client: TestClient, ksef_fa3_bytes: bytes
+):
+    """Two POSTs of the same KSeF XML → first 201 (created), second 200 (cached).
+
+    The second response carries the *same* invoice_id as the first, so
+    downstream consumers (n8n, Slack notifications) treat retries as
+    no-ops instead of duplicating records.
+    """
+    first = client.post(
+        "/invoices/ksef",
+        files={"file": ("faktura.xml", ksef_fa3_bytes, "application/xml")},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    second = client.post(
+        "/invoices/ksef",
+        files={"file": ("faktura.xml", ksef_fa3_bytes, "application/xml")},
+    )
+    assert second.status_code == 200
+    assert second.json()["id"] == first_id
+    # Body must be identical, not a degraded "already exists" stub —
+    # the client should not have to special-case 200 vs 201.
+    assert second.json()["invoice_number"] == first.json()["invoice_number"]
+    assert second.json()["totals"]["gross"] == first.json()["totals"]["gross"]
+
+
+def test_post_ksef_different_invoices_both_get_201(
+    client: TestClient, ksef_fa2_bytes: bytes, ksef_fa3_bytes: bytes
+):
+    """Different ``(seller_nip, invoice_number)`` keys → both create rows.
+
+    The dedup key is per-invoice, not per-request, so the FA(2) sample
+    and FA(3) sample (different invoice numbers + sellers) must both
+    land as 201 with distinct ids.
+    """
+    fa2 = client.post(
+        "/invoices/ksef",
+        files={"file": ("fa2.xml", ksef_fa2_bytes, "application/xml")},
+    )
+    fa3 = client.post(
+        "/invoices/ksef",
+        files={"file": ("fa3.xml", ksef_fa3_bytes, "application/xml")},
+    )
+    assert fa2.status_code == 201
+    assert fa3.status_code == 201
+    assert fa2.json()["id"] != fa3.json()["id"]
+
+
+# ---------------------------------------------------------------------------
 # Error paths.
 # ---------------------------------------------------------------------------
 

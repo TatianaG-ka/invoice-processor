@@ -54,4 +54,34 @@ curl -sSf "${URL}/invoices/search?q=Acme" | head -c 400
 echo ""
 
 echo ""
+echo "=== 5. Idempotency: re-POST the same XML, expect 200 + same id ==="
+# Use a different fixture from step 2 so this test is independent —
+# step 2 already claimed the FA(2) sample, so re-POSTing it would just
+# return the step-2 invoice. Use FA(3) here for a clean first 201.
+DEDUP_FIXTURE="docs/dane_testowe/ksef/faktura_fa3_sample.xml"
+if [[ ! -f "${DEDUP_FIXTURE}" ]]; then
+  echo "WARN: ${DEDUP_FIXTURE} missing; skipping idempotency check."
+else
+  FIRST_RESP="$(curl -sS -X POST -o /tmp/dedup-1.json -w "%{http_code}" \
+    -F "file=@${DEDUP_FIXTURE};type=application/xml" \
+    "${URL}/invoices/ksef")"
+  FIRST_ID="$(python -c 'import json; print(json.load(open("/tmp/dedup-1.json"))["id"])')"
+  echo "  First POST  → HTTP ${FIRST_RESP}, invoice_id=${FIRST_ID}"
+
+  SECOND_RESP="$(curl -sS -X POST -o /tmp/dedup-2.json -w "%{http_code}" \
+    -F "file=@${DEDUP_FIXTURE};type=application/xml" \
+    "${URL}/invoices/ksef")"
+  SECOND_ID="$(python -c 'import json; print(json.load(open("/tmp/dedup-2.json"))["id"])')"
+  echo "  Second POST → HTTP ${SECOND_RESP}, invoice_id=${SECOND_ID}"
+
+  if [[ "${SECOND_RESP}" == "200" && "${FIRST_ID}" == "${SECOND_ID}" ]]; then
+    echo "  ✅ Idempotency working: same id, 201→200 status flip."
+  else
+    echo "  ❌ Idempotency NOT working — expected second POST to be 200 with id=${FIRST_ID}."
+    echo "     Most likely cause: IDEMPOTENCY_REDIS_URL unset on Cloud Run."
+    exit 1
+  fi
+fi
+
+echo ""
 echo "Smoke test OK. Check Langfuse dashboard for the generation trace."

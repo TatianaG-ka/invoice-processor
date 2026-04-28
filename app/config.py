@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # --- Redis (queue backend) ---
     REDIS_URL: str = "redis://localhost:6379"
 
+    # --- Redis (idempotency layer for write endpoints) ---
+    # Optional: production points this at a managed Redis (Upstash) so
+    # the dedup keyspace is independent of the local queue. Empty →
+    # falls back to REDIS_URL (dev / CI).
+    IDEMPOTENCY_REDIS_URL: str = ""
+
     # --- Qdrant (vector store) ---
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION: str = "invoices"

@@ -47,6 +47,11 @@ set +a
 : "${OPENAI_MODEL:=gpt-4o-mini}"
 : "${LANGFUSE_HOST:=https://cloud.langfuse.com}"
 : "${QDRANT_COLLECTION:=invoices}"
+# Idempotency Redis is optional — empty value disables dedup (best-effort
+# layer falls through to a normal save). Production sets this to an
+# Upstash rediss:// URL; the queue's REDIS_URL stays at localhost since
+# the PDF queue isn't deployed to Cloud Run.
+: "${IDEMPOTENCY_REDIS_URL:=}"
 
 SERVICE_NAME="invoice-processor"
 REGION="europe-central2"
@@ -56,6 +61,11 @@ echo "  DATABASE_URL: (redacted, $(echo -n "$DATABASE_URL" | wc -c) chars)"
 echo "  OPENAI_MODEL: ${OPENAI_MODEL}"
 echo "  LANGFUSE_HOST: ${LANGFUSE_HOST}"
 echo "  QDRANT_URL: :memory: (embedded, reindex from Postgres on boot)"
+if [[ -n "${IDEMPOTENCY_REDIS_URL}" ]]; then
+  echo "  IDEMPOTENCY_REDIS_URL: (redacted, $(echo -n "${IDEMPOTENCY_REDIS_URL}" | wc -c) chars)"
+else
+  echo "  IDEMPOTENCY_REDIS_URL: (unset — duplicate KSeF posts will create duplicate rows)"
+fi
 echo ""
 
 # ---------------------------------------------------------------------
@@ -92,6 +102,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --set-env-vars "LANGFUSE_HOST=${LANGFUSE_HOST}" \
   --set-env-vars "QDRANT_URL=:memory:" \
   --set-env-vars "QDRANT_COLLECTION=${QDRANT_COLLECTION}" \
+  --set-env-vars "IDEMPOTENCY_REDIS_URL=${IDEMPOTENCY_REDIS_URL}" \
   --set-env-vars "ENVIRONMENT=production" \
   --set-env-vars "LOG_LEVEL=INFO"
 
