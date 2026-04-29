@@ -11,10 +11,11 @@
 
 ## What it does
 
-Polish businesses receive 60–100 invoices per month across three shapes: scanned PDFs, text-layer PDFs, and — from **April 2026**, mandatory for virtually every B2B business in Poland (large taxpayers above PLN 200M revenue went live in February 2026) — KSeF XML. This service normalises all of them into one typed record and surfaces two things that matter downstream:
+Polish businesses receive 60–100 invoices per month across three shapes: scanned PDFs, text-layer PDFs, and — from **April 2026**, mandatory for virtually every B2B business in Poland (large taxpayers above PLN 200M revenue went live in February 2026) — KSeF XML. This service normalises all of them into one typed record and surfaces three things that matter downstream:
 
 1. **Structured fields** behind `GET /invoices/{id}` — seller, buyer, line items, totals, dates — all in a consistent JSON shape regardless of ingestion path.
 2. **Semantic retrieval** behind `GET /invoices/search?q=...` — cosine similarity over sentence embeddings of seller name + line-item descriptions, so "find invoices about printer toner" works without exact-string matching.
+3. **LLM categorization** behind `POST /invoices/{id}/categorize` — RAG over Qdrant neighbours + `gpt-4o-mini` few-shot, persisted to the `invoices` row. Idempotent: subsequent calls return the cached category from Postgres in <100 ms with no LLM hit; `?force=true` overrides for prompt iterations.
 
 ---
 
@@ -25,6 +26,7 @@ flowchart LR
     Client([Client / n8n]) -->|POST /invoices PDF| API[FastAPI]
     Client -->|POST /invoices/ksef XML| API
     Client -->|GET /invoices/search| API
+    Client -->|POST /invoices/{id}/categorize| API
 
     API -->|enqueue job| Queue[(Redis + RQ)]
     Queue --> Worker[RQ Worker]
@@ -34,6 +36,10 @@ flowchart LR
     API -->|KSeF XML: lxml dual-schema FA 2 / FA 3| Extract
     Extract -->|async SQLAlchemy| PG[(PostgreSQL / Neon)]
     Extract -->|sentence-transformers MiniLM 384-dim| QD[(Qdrant embedded)]
+
+    API -->|RAG: top-3 neighbours| QD
+    QD -->|few-shot examples| Cat[OpenAI categorization]
+    Cat -->|persist category + confidence| PG
 
     API -->|@observe decorator| LF[Langfuse Cloud]
 
@@ -61,9 +67,10 @@ flowchart LR
 | PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically |
 | KSeF XML | lxml with dual-schema support | FA(2) legacy + FA(3) `http://crd.gov.pl/wzor/2025/06/25/13775/` |
 | LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.0003/call |
+| LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ~$0.00016/call |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
-| Observability | Langfuse Cloud | `@observe` on OpenAI call, token/cost tracking |
-| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 148 tests, ~5 s full run |
+| Observability | Langfuse Cloud | `@observe` on OpenAI calls (extraction + categorization), token/cost tracking |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 155 tests, ~5 s full run |
 | CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
 | Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
@@ -79,6 +86,7 @@ flowchart LR
 | `POST /invoices/ksef` | 201 + `StoredInvoice` | KSeF XML, synchronous (fast parse) |
 | `GET  /invoices/{id}` | 200 + `StoredInvoice` | Retrieve by DB primary key |
 | `GET  /invoices/search?q=...&limit=10` | 200 + `SearchResponse` | Semantic search, DB-hydrated results |
+| `POST /invoices/{id}/categorize?force=false` | 201 (fresh) or 200 (cached) + `CategorizationResult` | RAG over Qdrant + LLM categorization; idempotent by default |
 
 Every DB-touching endpoint narrows `sqlalchemy.exc.SQLAlchemyError` into a clean `503 Database temporarily unavailable.` — no stack trace ever reaches the wire.
 
@@ -108,6 +116,17 @@ curl -X POST -F "file=@docs/dane_testowe/ksef/faktura_fa2_sample.xml;type=applic
   "$URL/invoices/ksef"
 # {"id":1,...}
 # HTTP 200
+
+# RAG-driven LLM categorization (first call: 201 + LLM hit, ~3 s)
+curl -X POST "$URL/invoices/1/categorize"
+# {"invoice_id":1,"category":"Konsulting i doradztwo","confidence":0.8,
+#  "reasoning":"Faktura dotyczy usług konsultingowych...","cached":false}
+
+# Same call again — 200 + cached, no LLM hit, <100 ms
+curl -X POST "$URL/invoices/1/categorize" -w "\nHTTP %{http_code}\n"
+# {"invoice_id":1,"category":"Konsulting i doradztwo","confidence":0.8,
+#  "reasoning":null,"cached":true}
+# HTTP 200
 ```
 
 The `score` field is raw cosine similarity from MiniLM — the same sentence-transformers model that runs in production, not a test stub.
@@ -135,15 +154,16 @@ Note: n8n's `errorWorkflow` only triggers for production executions (active sche
 
 ## Observability
 
-Every OpenAI call is wrapped with `@observe(as_type="generation")` from the Langfuse SDK. Each trace carries the full prompt, the parsed structured output, the model name, token counts, latency, and cost.
+Every OpenAI call (extraction *and* categorization) is wrapped with `@observe(as_type="generation")` from the Langfuse SDK. Each trace carries the full prompt, the parsed structured output, the model name, token counts, latency, and cost.
 
 | | |
 |---|---|
 | ![Traces list](docs/langfuse_traces_list.png) | Four observations (two SPAN parents, two GENERATION children) from two extraction calls. Model `gpt-4o-mini`, latency 5–6 s, **$0.000274 / call**. |
-| ![Trace detail](docs/langfuse_trace_detail.png) | Drilldown: raw FAKTURA VAT input on top, the parsed `ExtractedInvoice` JSON on the bottom — `invoice_number`, `seller.nip`, `buyer.nip`, `line_items`, `totals.net/vat/gross/currency`. |
+| ![Trace detail](docs/langfuse_trace_detail.png) | Extraction drilldown: raw FAKTURA VAT input on top, the parsed `ExtractedInvoice` JSON on the bottom — `invoice_number`, `seller.nip`, `buyer.nip`, `line_items`, `totals.net/vat/gross/currency`. |
+| ![Categorization trace](docs/langfuse_categorize_trace_detail.png) | Categorization trace: full system prompt + few-shot user prompt (target invoice + Qdrant top-3 neighbours) + structured assistant response (`category`, `confidence`, `reasoning`). Latency 3–4 s, **$0.000156 / call** (cheaper than extraction — shorter prompt). |
 | ![Dashboard](docs/langfuse_dashboard.png) | Dashboard view: 2 traces, $0.000548 cumulative cost, 2.24 K tokens, cost/time chart over last 24 h. |
 
-The service degrades gracefully when Langfuse keys are absent: the decorator sees an empty `LANGFUSE_PUBLIC_KEY` and runs in no-op mode, which is how CI and local dev exercise the extractor without a Langfuse account.
+The service degrades gracefully when Langfuse keys are absent: the decorator sees an empty `LANGFUSE_PUBLIC_KEY` and runs in no-op mode, which is how CI and local dev exercise the LLM paths without a Langfuse account.
 
 ---
 
@@ -179,6 +199,28 @@ The service degrades gracefully when Langfuse keys are absent: the decorator see
 **Decision:** Before parsing, hash the request to a `(seller_nip, invoice_number)` pair (Polish tax law guarantees this is unique per invoice forever) and `GET` the key from a managed Redis (Upstash in production, fakeredis under tests). Hit → return the originally-stored row with `200 OK` and the same `id`. Miss → save, then `SET key=invoice_id EX 86400` so the next 24h of retries are no-ops. A separate `IDEMPOTENCY_REDIS_URL` keeps this keyspace independent of the queue's Redis.
 **Consequence:** `201 Created` (first time) and `200 OK` (cached) are both happy responses; consumers don't have to special-case status. Best-effort by design — a Redis outage logs a warning and falls through to a normal save (worse latency, possible duplicates during the outage window, but no failed requests). Tests cover both the cached-hit path and the Redis-outage fallthrough.
 
+### ADR-007 — DB-cached LLM categorization (RAG + idempotency by default)
+**Context:** Once an invoice is in the system, the next question is "what kind of expense is it?" — needed for ledger coding, expense-policy reporting, and downstream analytics. A pure-LLM endpoint would (a) cost a real-money OpenAI call on every request, even for invoices that haven't changed, and (b) miss the signal already in Qdrant: invoices similar to this one have *already* been categorized by a human or a prior LLM run.
+**Decision:** `POST /invoices/{id}/categorize` runs a small RAG flow — embed target → Qdrant top-3 already-categorized neighbours → few-shot prompt → `gpt-4o-mini` Structured Outputs → persist `category` + `category_confidence` to the `invoices` row. Subsequent calls return the persisted value with `cached=true` and `200 OK` (no LLM hit), mirroring the idempotency contract from ADR-006. `?force=true` overrides the cache for prompt-engineering iterations. Schema migration (two new columns + index) is applied via [`scripts/migrate_add_category.sql`](scripts/migrate_add_category.sql) — idempotent `IF NOT EXISTS` — because ADR-002 explicitly defers Alembic; for the demo's "few-tables, append-mostly" shape, raw SQL scripts under `scripts/` are the canonical migration channel.
+**Consequence:** Re-categorization is free (DB read), and prompt changes can be A/B-tested via `?force=true` without touching the schema. The persisted `reasoning` is intentionally not stored — only `category` + `confidence` — to keep the row narrow; the reasoning lives in the response of the originating call and (with full prompt + output) in the Langfuse trace. Operational caveat: the categorize path needs Qdrant ready, so the first call after a cold start can hit the reindex window (see Known limitations below).
+
+### ADR-008 — n8n as a loose-coupled pipeline client
+**Context:** A real KSeF inbox simulation needs an orchestration layer that polls, fans out, retries, and alerts on errors. Building that into the FastAPI service would conflate API surface with workflow logic; a separate n8n instance keeps each side focused.
+**Decision:** Two exported workflows under [`n8n/`](n8n/) live alongside the service in the repo. The HTTP node uses `fullResponse: true` + `neverError: true` + `IF` `typeValidation: "loose"` so the API can return raw `201`/`200`/`4xx`/`5xx` without n8n auto-failing — the IF branch routes on `statusCode` instead. The `errorWorkflow` binding fans non-2xx outcomes to a `errors` audit sheet + Slack alert, and the main flow logs `processed_invoices` rows for successes. The API itself stays unaware of n8n: it returns standard HTTP and lets the caller decide retry / alert policy.
+**Consequence:** Either side can evolve without breaking the other — the API can change response shapes (additive), n8n can change credentials, schedules, or fan-outs without touching code. The trade-offs (statusCode-as-string from n8n's HTTP transport, errorWorkflow only firing on production runs not manual executions) are documented in [Pipeline integration (n8n)](#pipeline-integration-n8n) above so a recruiter or maintainer can re-import without trial-and-error.
+
+---
+
+## Known limitations
+
+These are deliberate trade-offs documented up-front. None block the demo; each has a documented escape hatch when scope grows.
+
+| Limitation | Impact | Why it's acceptable today | Path to fix |
+|---|---|---|---|
+| **Cold-start window on Cloud Run** (ADR-004 + 005) | First request after `--min-instances=0` idle can hit a 503 while Qdrant reindex from Postgres + MiniLM model load is in flight. Reproducible: a lone `?force=true` after 15 min idle returns 503; retrying 10 s later returns 201. | A demo deployment doesn't justify always-warm pricing. Cache-hit path (`/categorize` w/o `force`) is DB-only and survives even before Qdrant is ready. | `--min-instances=1` (paid), or migrate to external Qdrant Cloud (removes the reindex window entirely). |
+| **PDF endpoint isn't deployed in Cloud Run** | `POST /invoices` (PDF) requires the RQ worker + a worker-side Redis; the live demo runs only the API container, so PDF upload returns a job_id whose status will never advance. KSeF + categorize + search are demo-facing. | The PDF path is fully exercised by the test suite and `docker-compose.v2.yml`; deploying the worker would double infra cost for one extra ingestion path. | Spin a second Cloud Run service for the worker (same image, override the entrypoint to `rq worker default`) once volume warrants it. |
+| **Langfuse Hobby tier — 30-day retention + variable flush latency** | Public dashboard URLs expire and traces older than 30 days are deleted. Flush latency from Cloud Run to Langfuse Cloud usually takes <60 s but has been observed up to ~20 min under load. | Static screenshots in [`docs/langfuse_*.png`](docs/) are checked in as permanent evidence. The service still works without Langfuse — keys absent → no-op decorator. | Upgrade to a paid Langfuse plan or self-host (the `@observe` instrumentation is portable). |
+
 ---
 
 ## Local development
@@ -207,7 +249,7 @@ pytest                         # full suite, ~5 seconds
 pytest --cov=app --cov-report=term-missing
 ```
 
-**148 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries, **Redis idempotency layer** (incl. retry-deduplication contract + Redis-outage fallthrough). Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ (sync API for the queue, async API for idempotency), `QdrantClient(":memory:")`, deterministic fake embedder — no external network on any test run.
+**155 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries, **Redis idempotency layer** (retry-dedup + Redis-outage fallthrough), **LLM categorization** (happy path + cache hit + `?force=true` + zero-shot fallback when Qdrant empty + 502 on LLM failure). Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ (sync API for the queue, async API for idempotency), `QdrantClient(":memory:")`, deterministic fake embedder, mocked OpenAI in categorize tests — no external network on any test run.
 
 ---
 
@@ -229,9 +271,11 @@ app/
   schemas/
     invoice.py              # ExtractedInvoice, StoredInvoice, SearchHit, SearchResponse
     job.py                  # JobAccepted, JobStatus
+    category.py             # InvoiceCategory enum + LLMCategorizationResponse + CategorizationResult
   services/
     pdf_text_extractor.py   # pdfplumber + OCR fallback
     invoice_extractor.py    # OpenAI Structured Outputs, Langfuse-instrumented
+    invoice_categorizer.py  # RAG over Qdrant + OpenAI categorization, idempotent persist
     ksef_parser.py          # dual-schema FA(2) + FA(3) XML → ExtractedInvoice
     embedder.py             # SentenceTransformer lazy singleton
     vector_store.py         # Qdrant wrapper + index_invoice + reindex_all
@@ -239,12 +283,13 @@ app/
 scripts/
   deploy_cloud_run.sh       # env-loading wrapper around `gcloud run deploy --source .`
   smoke_test_prod.sh        # curl-driven end-to-end verification of a live revision
+  migrate_add_category.sql  # idempotent `ALTER TABLE` for ADR-007 columns (Neon SQL editor)
 
 docs/
   dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
   langfuse_*.png            # observability screenshots (Hobby tier has 30-day retention)
 
-tests/                      # 148 tests, hermetic, ~5 s
+tests/                      # 155 tests, hermetic, ~5 s
 ```
 
 ---
