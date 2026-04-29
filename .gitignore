@@ -123,6 +123,8 @@ tmp/
 !docs/langfuse_*.png
 # Idempotency smoke-test screenshot — referenced from README live-demo section
 !docs/idempotency_*.png
+# Live Swagger UI screenshot — referenced from README live-demo section
+!docs/swagger_*.png
 
 # ============================================
 # Manual smoke tests (consume real API credits, per-dev tooling)

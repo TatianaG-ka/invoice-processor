@@ -133,6 +133,10 @@ The `score` field is raw cosine similarity from MiniLM — the same sentence-tra
 
 End-to-end verification (health → KSeF → retrieval → search → idempotency) is automated in [`scripts/smoke_test_prod.sh`](scripts/smoke_test_prod.sh) — see [`docs/idempotency_smoke_test.png`](docs/idempotency_smoke_test.png) for the live `201 → 200, same id` flip from a recent revision.
 
+The full live API surface is browsable at [`/docs`](https://invoice-processor-510066601703.europe-central2.run.app/docs) (FastAPI's auto-generated Swagger UI from the same Pydantic schemas the code uses):
+
+![Swagger UI on Cloud Run](docs/swagger_fastapi.png)
+
 ---
 
 ## Pipeline integration (n8n)
