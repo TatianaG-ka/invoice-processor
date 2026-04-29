@@ -92,9 +92,7 @@ app = FastAPI(
         "with `GET /invoices/{id}`.\n"
         "4. **Categorize** with `POST /invoices/{id}/categorize` "
         "(LLM-driven, ~$0.0002/call, idempotent).\n\n"
-        "Semantic search: try `GET /invoices/search?q=Acme` after step 2. "
-        "Aggregate report: `GET /invoices/stats` (per-category totals, "
-        "n8n-friendly).\n\n"
+        "Semantic search: try `GET /invoices/search?q=Acme` after step 2.\n\n"
         "> ⚠️ **First request may return `503` (~10s cold start)** — this is hosted on "
         "Cloud Run with `min-instances=0` to keep the demo free. Retry once and it "
         "wakes up. Subsequent requests respond in milliseconds."
@@ -317,6 +315,11 @@ async def list_invoices(
     "/invoices/stats",
     response_model=InvoiceStats,
     tags=["Invoices"],
+    # Hidden from the public Swagger to keep the demo surface focused on
+    # the ingestion → search → categorise flow. The route stays wired
+    # (and tested) for an n8n consumer that knows the URL — the kind of
+    # back-channel a workflow integration would actually use.
+    include_in_schema=False,
 )
 async def invoice_stats(
     session: Annotated[AsyncSession, Depends(get_db)],
@@ -325,15 +328,11 @@ async def invoice_stats(
 ) -> InvoiceStats:
     """Aggregate invoice totals grouped by category over a recent window.
 
-    **Why this exists**: an n8n workflow that builds a monthly Slack
-    report should not have to fetch every invoice and re-aggregate
-    client-side — that pattern hits memory limits in workflow runners
-    and burns network round-trips. This endpoint pushes the work to
-    Postgres (`GROUP BY` + `SUM`) and returns a constant-size payload.
-
-    Defaults to the last 30 days in PLN. Invoices not yet categorised
-    via `POST /invoices/{id}/categorize` show up under the `null`
-    category bucket so the caller sees the un-categorised share.
+    Pushes the work to Postgres (`GROUP BY` + `SUM`) and returns a
+    constant-size payload — designed for n8n / Slack monthly-report
+    workflows that would otherwise hit memory limits aggregating
+    client-side. Defaults to the last 30 days in PLN; un-categorised
+    invoices show up under the `null` category bucket.
     """
     if period_days < 1 or period_days > 365:
         raise HTTPException(
