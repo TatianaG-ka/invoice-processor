@@ -165,11 +165,6 @@ def _call_openai(
     if _langfuse_enabled():
         try:
             langfuse_context.update_current_observation(
-                input=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                output=parsed.model_dump(),
                 model=settings.OPENAI_MODEL,
                 usage={
                     "promptTokens": completion.usage.prompt_tokens,
