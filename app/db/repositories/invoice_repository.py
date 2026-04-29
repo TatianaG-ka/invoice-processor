@@ -9,9 +9,10 @@ not import SQLAlchemy types.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Invoice
@@ -58,6 +59,45 @@ class InvoiceRepository:
         stmt = select(Invoice).order_by(Invoice.id.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def aggregate_by_category(
+        self,
+        period_days: int,
+        currency: str,
+    ) -> tuple[list[tuple[str | None, int, Decimal]], int, Decimal]:
+        """Aggregate invoice totals grouped by category over a recent window.
+
+        Returns ``(rows, total_count, grand_total)`` where ``rows`` is a
+        list of ``(category, count, sum_total_gross)`` tuples, ordered
+        by total descending. Filtering happens server-side via SQL
+        ``GROUP BY`` — the response size is independent of the number
+        of invoices in the window, which is the whole point.
+
+        ``category`` may be ``None`` for invoices that have not been
+        through ``POST /invoices/{id}/categorize`` yet; the
+        un-categorised bucket is included rather than silently dropped.
+        """
+        cutoff = datetime.now(UTC) - timedelta(days=period_days)
+        sum_expr = func.coalesce(func.sum(Invoice.total_gross), 0)
+        stmt = (
+            select(
+                Invoice.category,
+                func.count(Invoice.id),
+                sum_expr,
+            )
+            .where(Invoice.created_at >= cutoff)
+            .where(Invoice.currency == currency)
+            .group_by(Invoice.category)
+            .order_by(sum_expr.desc())
+        )
+        result = await self._session.execute(stmt)
+        rows: list[tuple[str | None, int, Decimal]] = [
+            (category, int(count), Decimal(str(total or 0)))
+            for category, count, total in result.all()
+        ]
+        total_count = sum(row[1] for row in rows)
+        grand_total = sum((row[2] for row in rows), Decimal("0"))
+        return rows, total_count, grand_total
 
     async def update_category(
         self,

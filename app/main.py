@@ -41,6 +41,7 @@ from app.queue.tasks import process_pdf_invoice
 from app.schemas.category import CategorizationResult
 from app.schemas.invoice import SearchHit, SearchResponse, StoredInvoice
 from app.schemas.job import JobAccepted, JobStatus
+from app.schemas.stats import CategoryStats, InvoiceStats
 from app.services import embedder, idempotency
 from app.services.invoice_categorizer import (
     InvoiceCategorizationError,
@@ -91,7 +92,9 @@ app = FastAPI(
         "with `GET /invoices/{id}`.\n"
         "4. **Categorize** with `POST /invoices/{id}/categorize` "
         "(LLM-driven, ~$0.0002/call, idempotent).\n\n"
-        "Semantic search: try `GET /invoices/search?q=Acme` after step 2.\n\n"
+        "Semantic search: try `GET /invoices/search?q=Acme` after step 2. "
+        "Aggregate report: `GET /invoices/stats` (per-category totals, "
+        "n8n-friendly).\n\n"
         "> ⚠️ **First request may return `503` (~10s cold start)** — this is hosted on "
         "Cloud Run with `min-instances=0` to keep the demo free. Retry once and it "
         "wakes up. Subsequent requests respond in milliseconds."
@@ -308,6 +311,60 @@ async def list_invoices(
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
     return [orm_to_stored_invoice(row) for row in rows]
+
+
+@app.get(
+    "/invoices/stats",
+    response_model=InvoiceStats,
+    tags=["Invoices"],
+)
+async def invoice_stats(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    period_days: int = 30,
+    currency: str = "PLN",
+) -> InvoiceStats:
+    """Aggregate invoice totals grouped by category over a recent window.
+
+    **Why this exists**: an n8n workflow that builds a monthly Slack
+    report should not have to fetch every invoice and re-aggregate
+    client-side — that pattern hits memory limits in workflow runners
+    and burns network round-trips. This endpoint pushes the work to
+    Postgres (`GROUP BY` + `SUM`) and returns a constant-size payload.
+
+    Defaults to the last 30 days in PLN. Invoices not yet categorised
+    via `POST /invoices/{id}/categorize` show up under the `null`
+    category bucket so the caller sees the un-categorised share.
+    """
+    if period_days < 1 or period_days > 365:
+        raise HTTPException(
+            status_code=400,
+            detail="'period_days' must be between 1 and 365.",
+        )
+    if len(currency) != 3 or not currency.isalpha():
+        raise HTTPException(
+            status_code=400,
+            detail="'currency' must be a 3-letter ISO code (e.g. PLN, EUR).",
+        )
+
+    repo = InvoiceRepository(session)
+    try:
+        rows, total_count, grand_total = await repo.aggregate_by_category(
+            period_days=period_days,
+            currency=currency.upper(),
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
+
+    return InvoiceStats(
+        period_days=period_days,
+        currency=currency.upper(),
+        total_invoices=total_count,
+        grand_total_gross=grand_total,
+        by_category=[
+            CategoryStats(category=category, count=count, total_gross=total)
+            for category, count, total in rows
+        ],
+    )
 
 
 @app.get(
