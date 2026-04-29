@@ -73,8 +73,12 @@ async def test_stats_aggregates_counts_and_sums_per_category(
     client: TestClient, db_session: AsyncSession
 ):
     """Two invoices in the same category should collapse into one bucket."""
-    db_session.add(_make_invoice(total_gross=Decimal("100.00"), category="Usługi IT i oprogramowanie"))
-    db_session.add(_make_invoice(total_gross=Decimal("250.50"), category="Usługi IT i oprogramowanie"))
+    db_session.add(
+        _make_invoice(total_gross=Decimal("100.00"), category="Usługi IT i oprogramowanie")
+    )
+    db_session.add(
+        _make_invoice(total_gross=Decimal("250.50"), category="Usługi IT i oprogramowanie")
+    )
     db_session.add(_make_invoice(total_gross=Decimal("80.00"), category="Materiały biurowe"))
     db_session.add(_make_invoice(total_gross=Decimal("40.00"), category=None))
     await db_session.commit()
@@ -95,9 +99,7 @@ async def test_stats_aggregates_counts_and_sums_per_category(
 
 
 @pytest.mark.asyncio
-async def test_stats_period_window_excludes_old_rows(
-    client: TestClient, db_session: AsyncSession
-):
+async def test_stats_period_window_excludes_old_rows(client: TestClient, db_session: AsyncSession):
     """Rows older than ``period_days`` must not contribute to totals."""
     fresh = datetime.now(UTC) - timedelta(days=5)
     stale = datetime.now(UTC) - timedelta(days=45)
@@ -131,9 +133,7 @@ async def test_stats_currency_filter_excludes_other_currencies(
 
 
 @pytest.mark.asyncio
-async def test_stats_currency_query_is_uppercased(
-    client: TestClient, db_session: AsyncSession
-):
+async def test_stats_currency_query_is_uppercased(client: TestClient, db_session: AsyncSession):
     db_session.add(_make_invoice(total_gross=Decimal("100.00"), currency="PLN"))
     await db_session.commit()
 
