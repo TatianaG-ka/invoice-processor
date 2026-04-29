@@ -79,10 +79,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Invoice Processor API",
     description=(
-        "Automatic invoice processing: PDF → OCR → AI extraction → "
-        "database entry + semantic search."
+        "**KSeF-compatible invoice intelligence service** — parse, store, search "
+        "and categorize Polish invoices (FA(2) / FA(3)) with LLM-powered RAG.\n\n"
+        "### Try it live (4 steps, ~30 seconds)\n"
+        "1. **Download** a sample XML invoice: "
+        "[fa3_minimal.xml](https://raw.githubusercontent.com/TatianaG-ka/invoice-processor/main/tests/fixtures/ksef/fa3_minimal.xml) "
+        "(right-click → *Save link as…*)\n"
+        "2. **Upload** it via `POST /invoices/ksef` (Try it out → Choose file → Execute) — "
+        "returns `201 Created` with the stored invoice + assigned `id`.\n"
+        "3. **Browse** all invoices with `GET /invoices` or fetch one by id "
+        "with `GET /invoices/{id}`.\n"
+        "4. **Categorize** with `POST /invoices/{id}/categorize` "
+        "(LLM-driven, ~$0.0002/call, idempotent).\n\n"
+        "Semantic search: try `GET /invoices/search?q=Acme` after step 2.\n\n"
+        "> ⚠️ **First request may return `503` (~10s cold start)** — this is hosted on "
+        "Cloud Run with `min-instances=0` to keep the demo free. Retry once and it "
+        "wakes up. Subsequent requests respond in milliseconds."
     ),
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -97,7 +111,7 @@ MAX_UPLOAD_SIZE_MB = 10
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 
-@app.get("/", tags=["Health"])
+@app.get("/", tags=["Health"], include_in_schema=False)
 def read_root():
     """Basic endpoint checking that the service is working."""
     return {"status": "ok", "service": "invoice-processor"}
@@ -113,18 +127,18 @@ def health_check():
     status_code=202,
     response_model=JobAccepted,
     tags=["Invoices"],
+    include_in_schema=False,  # PDF path requires a Redis worker (local dev only).
 )
 def upload_invoice(
     file: Annotated[UploadFile, File()],
     queue: Annotated[Queue, Depends(queue_dependency)],
 ) -> JobAccepted:
-    """Accept a PDF upload and enqueue background processing.
+    """Accept a PDF upload and enqueue background processing (local dev only).
 
-    Synchronous route (``def``) on purpose — the handler does no async
-    work. Reading the body is sync, enqueueing is sync, and running
-    the route in FastAPI's threadpool keeps ``asyncio.run`` inside the
-    task function safe from nested-event-loop errors when the queue is
-    configured to execute jobs inline (tests).
+    Hidden from the public Swagger because Cloud Run runs without an
+    RQ worker (cost optimization). Use ``POST /invoices/ksef`` for the
+    deployed demo. The route stays wired for local development and the
+    integration test suite, which runs the queue inline.
     """
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -157,19 +171,16 @@ def upload_invoice(
     "/invoices/jobs/{job_id}",
     response_model=JobStatus,
     tags=["Invoices"],
+    include_in_schema=False,  # Companion to POST /invoices — local dev only.
 )
 def get_job_status(
     job_id: str,
     queue: Annotated[Queue, Depends(queue_dependency)],
 ) -> JobStatus:
-    """Return the status of a previously-enqueued extraction job.
+    """Poll the status of a previously-enqueued PDF extraction job.
 
-    Success path: ``status == "finished"`` + ``invoice_id`` set.
-    The client then fetches ``GET /invoices/{invoice_id}``.
-
-    Failure path: ``status == "failed"`` + ``error`` populated with
-    the last line of the worker-side traceback (no full stack trace
-    leaked to the client).
+    Hidden from the public Swagger alongside ``POST /invoices`` —
+    only meaningful when a Redis worker is running locally.
     """
     try:
         job = Job.fetch(job_id, connection=queue.connection)
@@ -206,13 +217,15 @@ async def upload_ksef_invoice(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StoredInvoice:
-    """Accept a KSeF XML invoice (FA(2) or FA(3)), persist, return stored.
+    """Upload a KSeF XML invoice (FA(2) or FA(3)) — parse, persist, index for search.
 
-    Idempotent on ``(seller_nip, invoice_number)``: a retried POST of
-    the same invoice within 24h returns the originally stored record
-    with HTTP 200 instead of creating a duplicate row. Backed by Redis
-    (Upstash in production, fakeredis in tests). Redis outages degrade
-    gracefully to "no dedup", not "no service".
+    **Idempotent**: re-posting the same invoice within 24h returns the
+    original record with `200 OK` instead of creating a duplicate
+    (matched on seller NIP + invoice number).
+
+    **Try it now**: download the sample
+    [fa3_minimal.xml](https://raw.githubusercontent.com/TatianaG-ka/invoice-processor/main/tests/fixtures/ksef/fa3_minimal.xml)
+    and upload it via *Try it out → Choose file → Execute*.
     """
     if file.content_type not in KSEF_CONTENT_TYPES:
         raise HTTPException(
@@ -273,6 +286,31 @@ async def upload_ksef_invoice(
 
 
 @app.get(
+    "/invoices",
+    response_model=list[StoredInvoice],
+    tags=["Invoices"],
+)
+async def list_invoices(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 50,
+) -> list[StoredInvoice]:
+    """List recently stored invoices, newest first.
+
+    Useful as an entry point: after uploading via ``POST /invoices/ksef``
+    you can browse the table here without remembering the assigned id.
+    Returns up to ``limit`` rows (default 50, max 100).
+    """
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="'limit' must be between 1 and 100.")
+    repo = InvoiceRepository(session)
+    try:
+        rows = await repo.list_all(limit=limit)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable.") from exc
+    return [orm_to_stored_invoice(row) for row in rows]
+
+
+@app.get(
     "/invoices/search",
     response_model=SearchResponse,
     tags=["Invoices"],
@@ -283,16 +321,13 @@ async def search_invoices(
     store: Annotated[VectorStore, Depends(vector_store_dependency)],
     limit: int = 10,
 ) -> SearchResponse:
-    """Semantic search over persisted invoices.
+    """Semantic vector search over persisted invoices.
 
-    Registered **before** ``GET /invoices/{invoice_id}`` so FastAPI's
-    in-order path matching routes ``/invoices/search`` here rather than
-    trying to coerce ``"search"`` into an ``int`` invoice id.
-
-    The Qdrant call is offloaded to a thread because the client is
-    synchronous; the embed call is CPU-bound (fast on short queries)
-    but offloaded for the same reason — we don't want the event loop
-    blocked while the model runs.
+    Embeds the query with a multilingual MiniLM model and returns the
+    closest invoices by cosine similarity. Works across language and
+    paraphrase — try `Acme`, `konsulting`, or `software development`
+    after uploading a few invoices. Each hit ships with the full
+    invoice payload so you don't need a follow-up GET.
     """
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query 'q' must not be empty.")
@@ -334,17 +369,15 @@ async def categorize_invoice_endpoint(
     response: Response,
     force: bool = False,
 ) -> CategorizationResult:
-    """Assign one of 12 ``InvoiceCategory`` values to a stored invoice.
+    """Classify an invoice into one of 12 expense categories using an LLM.
 
-    Idempotent (ADR-007): the first call performs an LLM-driven RAG
-    categorization (``201 Created``); subsequent calls return the
-    cached row (``200 OK``) until ``?force=true`` triggers a fresh
-    LLM call. Mirrors the 201/200 flip used by ADR-006 idempotency
-    on ``POST /invoices/ksef``.
+    **How it works**: retrieves similar invoices from the vector store
+    (RAG), asks GPT-4o-mini to assign a category + confidence + Polish
+    rationale, and caches the result on the invoice row.
 
-    Wraps :class:`InvoiceNotFoundError` to ``404`` and any
-    :class:`SQLAlchemyError` to ``503`` so the contract matches the
-    rest of the surface (no DB stack traces ever reach the wire).
+    **Idempotent**: first call runs the LLM (`201 Created`, ~$0.0002);
+    repeat calls return the cached classification instantly (`200 OK`).
+    Pass `?force=true` to trigger a fresh LLM call.
     """
     try:
         result, was_fresh = await categorize_invoice(
@@ -371,7 +404,11 @@ async def get_invoice(
     invoice_id: int,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StoredInvoice:
-    """Return the stored invoice with the given primary key."""
+    """Fetch a single invoice by its assigned id.
+
+    The id is returned by `POST /invoices/ksef` (`id` field) and listed
+    in `GET /invoices`. Try `1` if you've just uploaded the sample XML.
+    """
     repo = InvoiceRepository(session)
     try:
         row = await repo.get_by_id(invoice_id)
