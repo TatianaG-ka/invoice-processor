@@ -72,9 +72,7 @@ def test_post_ksef_then_get_by_id_roundtrip(client: TestClient, ksef_fa3_bytes: 
 # ---------------------------------------------------------------------------
 
 
-def test_post_ksef_duplicate_returns_200_with_same_id(
-    client: TestClient, ksef_fa3_bytes: bytes
-):
+def test_post_ksef_duplicate_returns_200_with_same_id(client: TestClient, ksef_fa3_bytes: bytes):
     """Two POSTs of the same KSeF XML → first 201 (created), second 200 (cached).
 
     The second response carries the *same* invoice_id as the first, so

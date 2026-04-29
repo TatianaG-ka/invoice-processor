@@ -101,9 +101,18 @@ curl -X POST -F "file=@docs/dane_testowe/ksef/faktura_fa2_sample.xml;type=applic
 # Semantic search
 curl "$URL/invoices/search?q=Acme"
 # {"query":"Acme","results":[{"score":0.398,"invoice":{"id":1,...}}]}
+
+# Re-POST the same invoice — 200 OK + same id (Redis idempotency, 24h TTL)
+curl -X POST -F "file=@docs/dane_testowe/ksef/faktura_fa2_sample.xml;type=application/xml" \
+  -w "\nHTTP %{http_code}\n" \
+  "$URL/invoices/ksef"
+# {"id":1,...}
+# HTTP 200
 ```
 
 The `score` field is raw cosine similarity from MiniLM — the same sentence-transformers model that runs in production, not a test stub.
+
+End-to-end verification (health → KSeF → retrieval → search → idempotency) is automated in [`scripts/smoke_test_prod.sh`](scripts/smoke_test_prod.sh) — see [`docs/idempotency_smoke_test.png`](docs/idempotency_smoke_test.png) for the live `201 → 200, same id` flip from a recent revision.
 
 ---
 
