@@ -8,7 +8,6 @@ no monkeypatching of the service itself is needed for the happy paths.
 
 from __future__ import annotations
 
-import pytest
 from redis.exceptions import RedisError
 
 from app.services import idempotency

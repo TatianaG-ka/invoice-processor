@@ -36,12 +36,14 @@ def _seed_invoice(client: TestClient, ksef_fa3_bytes: bytes) -> int:
 @pytest.fixture
 def stub_openai(monkeypatch):
     """Replace ``_call_openai`` with a deterministic IT-category stub."""
+
     def _stub(target, examples):
         return LLMCategorizationResponse(
             category=InvoiceCategory.IT,
             confidence=0.87,
             reasoning="Pozycje opisują usługi IT (hosting i wsparcie techniczne).",
         )
+
     monkeypatch.setattr(invoice_categorizer, "_call_openai", _stub)
     return _stub
 
@@ -166,9 +168,7 @@ def test_categorize_404_when_invoice_missing(client: TestClient, stub_openai):
 # ---------------------------------------------------------------------------
 
 
-def test_categorize_502_when_llm_fails(
-    client: TestClient, ksef_fa3_bytes: bytes, monkeypatch
-):
+def test_categorize_502_when_llm_fails(client: TestClient, ksef_fa3_bytes: bytes, monkeypatch):
     invoice_id = _seed_invoice(client, ksef_fa3_bytes)
 
     def _raising_stub(target, examples):

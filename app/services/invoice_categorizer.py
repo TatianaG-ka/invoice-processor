@@ -105,9 +105,7 @@ def _format_invoice_for_prompt(invoice: Invoice) -> str:
     descriptions) so the prompt and the retrieval are pointed at the
     same signal.
     """
-    descriptions = "; ".join(
-        item.get("description", "") for item in (invoice.line_items or [])
-    )
+    descriptions = "; ".join(item.get("description", "") for item in (invoice.line_items or []))
     return (
         f"Sprzedawca: {invoice.seller_name}\n"
         f"Numer faktury: {invoice.invoice_number or '(brak)'}\n"
@@ -121,8 +119,7 @@ def _build_user_prompt(target: Invoice, examples: list[Invoice]) -> str:
     parts: list[str] = []
     for i, ex in enumerate(examples, start=1):
         parts.append(
-            f"### Przykład {i} (kategoria: {ex.category})\n"
-            f"{_format_invoice_for_prompt(ex)}"
+            f"### Przykład {i} (kategoria: {ex.category})\n" f"{_format_invoice_for_prompt(ex)}"
         )
     parts.append(
         "### Faktura do skategoryzowania\n"
@@ -163,9 +160,7 @@ def _call_openai(
     )
     parsed = completion.choices[0].message.parsed
     if parsed is None:
-        raise InvoiceCategorizationError(
-            "OpenAI returned no parsed payload for categorization."
-        )
+        raise InvoiceCategorizationError("OpenAI returned no parsed payload for categorization.")
 
     if _langfuse_enabled():
         try:
@@ -260,16 +255,12 @@ async def categorize_invoice(
             False,
         )
 
-    examples = await _retrieve_similar_examples(
-        target=target, store=store, session=session
-    )
+    examples = await _retrieve_similar_examples(target=target, store=store, session=session)
 
     try:
         llm_response = await asyncio.to_thread(_call_openai, target, examples)
     except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
-        raise InvoiceCategorizationError(
-            f"OpenAI transient error after retries: {exc!r}"
-        ) from exc
+        raise InvoiceCategorizationError(f"OpenAI transient error after retries: {exc!r}") from exc
     except InvoiceCategorizationError:
         raise
     except Exception as exc:  # noqa: BLE001 — surface OpenAI errors as our domain error
@@ -282,9 +273,7 @@ async def categorize_invoice(
     )
     if updated is None:
         # Race condition: invoice deleted between fetch + update.
-        raise InvoiceNotFoundError(
-            f"Invoice id={invoice_id} disappeared during categorization."
-        )
+        raise InvoiceNotFoundError(f"Invoice id={invoice_id} disappeared during categorization.")
 
     return (
         CategorizationResult(
