@@ -2,8 +2,13 @@
 
 > **KSeF-compatible invoice intelligence microservice.** Ingest a Polish invoice (PDF or KSeF XML), extract structured fields with an LLM, persist to Postgres, make the archive semantically searchable.
 
-**Live demo:** https://invoice-processor-510066601703.europe-central2.run.app
-([`/docs`](https://invoice-processor-510066601703.europe-central2.run.app/docs) for the interactive OpenAPI UI)
+## 🚀 Try it live (interactive Swagger UI, ~30 seconds)
+
+**[https://invoice-processor-510066601703.europe-central2.run.app/docs](https://invoice-processor-510066601703.europe-central2.run.app/docs)**
+
+Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal.xml`](https://raw.githubusercontent.com/TatianaG-ka/invoice-processor/main/tests/fixtures/ksef/fa3_minimal.xml) (right-click → *Save link as…*) → *Execute* → see the parsed invoice + assigned `id`. Then browse with `GET /invoices`, classify with `POST /invoices/{id}/categorize`, and search semantically with `GET /invoices/search?q=Acme`. The full happy path is on the Swagger landing page itself.
+
+> ⚠️ **First request may take ~10s** — Cloud Run cold start with `min-instances=0` (free-tier hosting). Retry once and it wakes up; subsequent calls respond in milliseconds.
 
 ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
 
