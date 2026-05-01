@@ -303,6 +303,32 @@
         1344,
         432
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://invoice-processor-510066601703.europe-central2.run.app/invoices/{{ $('Extract Result Fields').item.json.invoiceId }}/categorize",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-00000000000a",
+      "name": "POST /categorize (LLM side-effect)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        16
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
     }
   ],
   "pinData": {},
@@ -375,6 +401,11 @@
         [
           {
             "node": "Slack: success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "POST /categorize (LLM side-effect)",
             "type": "main",
             "index": 0
           }
