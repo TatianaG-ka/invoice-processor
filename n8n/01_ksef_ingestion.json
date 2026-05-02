@@ -166,6 +166,91 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "=https://invoice-processor-510066601703.europe-central2.run.app/invoices/{{ $('Extract Result Fields').item.json.invoiceId }}/categorize",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-00000000000a",
+      "name": "POST /categorize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "merge-1",
+              "name": "category",
+              "value": "={{ $json.body.category || 'uncategorized' }}",
+              "type": "string"
+            },
+            {
+              "id": "merge-2",
+              "name": "categoryConfidence",
+              "value": "={{ $json.body.confidence || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "merge-3",
+              "name": "invoiceId",
+              "value": "={{ $('Extract Result Fields').item.json.invoiceId }}",
+              "type": "number"
+            },
+            {
+              "id": "merge-4",
+              "name": "vendorNip",
+              "value": "={{ $('Extract Result Fields').item.json.vendorNip }}",
+              "type": "string"
+            },
+            {
+              "id": "merge-5",
+              "name": "amountGross",
+              "value": "={{ $('Extract Result Fields').item.json.amountGross }}",
+              "type": "number"
+            },
+            {
+              "id": "merge-6",
+              "name": "invoiceNumber",
+              "value": "={{ $('Extract Result Fields').item.json.invoiceNumber }}",
+              "type": "string"
+            },
+            {
+              "id": "merge-7",
+              "name": "timestamp",
+              "value": "={{ $('Extract Result Fields').item.json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-00000000000b",
+      "name": "Set: Merge Category",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1792,
+        192
+      ]
+    },
+    {
+      "parameters": {
         "authentication": "oAuth2",
         "select": "channel",
         "channelId": {
@@ -173,7 +258,7 @@
           "value": "invoice-pipeline-demo",
           "mode": "name"
         },
-        "text": "=:white_check_mark: Invoice *{{ $json.invoiceNumber }}* (id={{ $json.invoiceId }}) from NIP `{{ $json.vendorNip }}` indexed — *{{ $json.amountGross }} PLN*",
+        "text": "=:white_check_mark: Invoice *{{ $json.invoiceNumber }}* (id={{ $json.invoiceId }}) from NIP `{{ $json.vendorNip }}` indexed — *{{ $json.amountGross }} PLN* · :brain: *{{ $json.category }}* ({{ $json.categoryConfidence }})",
         "otherOptions": {}
       },
       "id": "a1b2c3d4-0001-4000-8000-000000000007",
@@ -181,7 +266,7 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
       "position": [
-        1568,
+        2016,
         192
       ],
       "credentials": {
@@ -208,10 +293,12 @@
           "mappingMode": "defineBelow",
           "value": {
             "status": "indexed",
-            "invoice_id": "={{ $('Extract Result Fields').item.json.invoiceId }}",
-            "invoice_number": "={{ $('Extract Result Fields').item.json.invoiceNumber }}",
-            "vendor_nip": "={{ $('Extract Result Fields').item.json.vendorNip }}",
-            "amount_gross_pln": "={{ $('Extract Result Fields').item.json.amountGross }}",
+            "invoice_id": "={{ $('Set: Merge Category').item.json.invoiceId }}",
+            "invoice_number": "={{ $('Set: Merge Category').item.json.invoiceNumber }}",
+            "vendor_nip": "={{ $('Set: Merge Category').item.json.vendorNip }}",
+            "amount_gross_pln": "={{ $('Set: Merge Category').item.json.amountGross }}",
+            "category": "={{ $('Set: Merge Category').item.json.category }}",
+            "confidence": "={{ $('Set: Merge Category').item.json.categoryConfidence }}",
             "timestamp": "={{ $now.toISO() }}"
           },
           "matchingColumns": [],
@@ -269,6 +356,24 @@
               "display": true,
               "type": "string",
               "canBeUsedToMatch": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
             }
           ],
           "attemptToConvertTypes": false,
@@ -281,7 +386,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
       "position": [
-        1792,
+        2240,
         192
       ],
       "credentials": {
@@ -303,32 +408,6 @@
         1344,
         432
       ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=https://invoice-processor-510066601703.europe-central2.run.app/invoices/{{ $('Extract Result Fields').item.json.invoiceId }}/categorize",
-        "options": {
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          },
-          "timeout": 30000
-        }
-      },
-      "id": "a1b2c3d4-0001-4000-8000-00000000000a",
-      "name": "POST /categorize (LLM side-effect)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1568,
-        16
-      ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 3000
     }
   ],
   "pinData": {},
@@ -400,12 +479,29 @@
       "main": [
         [
           {
-            "node": "Slack: success",
+            "node": "POST /categorize",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "POST /categorize": {
+      "main": [
+        [
           {
-            "node": "POST /categorize (LLM side-effect)",
+            "node": "Set: Merge Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Merge Category": {
+      "main": [
+        [
+          {
+            "node": "Slack: success",
             "type": "main",
             "index": 0
           }
@@ -442,7 +538,7 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "versionId": "6cde92fd-b1d1-41e5-a2f2-ff55f215647c",
+  "versionId": "01-ksef-ingestion-v2-sequential",
   "meta": {
     "templateCredsSetupCompleted": false
   },
