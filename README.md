@@ -26,38 +26,11 @@ Polish businesses receive 60–100 invoices per month across three shapes: scann
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Client([Client / n8n]) -->|POST /invoices PDF| API[FastAPI]
-    Client -->|POST /invoices/ksef XML| API
-    Client -->|GET /invoices/search| API
-    Client -->|POST /invoices/{id}/categorize| API
+<img width="960" height="924" alt="invoice_processing_architecture" src="https://github.com/user-attachments/assets/e7be2ffa-bbf2-4c99-87c6-c682b730e7db" />
 
-    API -->|enqueue job| Queue[(Redis + RQ)]
-    Queue --> Worker[RQ Worker]
-    Worker -->|pdfplumber + pytesseract OCR fallback| Text[Raw text]
-    Text -->|OpenAI Structured Outputs| Extract[ExtractedInvoice]
 
-    API -->|KSeF XML: lxml dual-schema FA 2 / FA 3| Extract
-    Extract -->|async SQLAlchemy| PG[(PostgreSQL / Neon)]
-    Extract -->|sentence-transformers MiniLM 384-dim| QD[(Qdrant embedded)]
-
-    API -->|RAG: top-3 neighbours| QD
-    QD -->|few-shot examples| Cat[OpenAI categorization]
-    Cat -->|persist category + confidence| PG
-
-    API -->|@observe decorator| LF[Langfuse Cloud]
-
-    PG -->|reindex on startup| QD
-
-    subgraph Cloud Run
-        API
-        Worker
-        QD
-    end
-```
-
-**One-line summary of the read path:** embed query → Qdrant cosine top-K → hydrate full rows from Postgres (DB is system of record, vector store is refreshable).
+**The diagram shows the full flow:** the client/n8n sends requests to FastAPI, which either queues work through Redis + RQ, where the worker performs OCR and extraction with OpenAI, or parses KSeF XML directly. The result, ExtractedInvoice, is written in parallel to PostgreSQL and Qdrant; categorization uses RAG, with Qdrant neighbors passed as few-shot examples to OpenAI, and the result is stored back in PostgreSQL.
+Everything runs inside Cloud Run, shown as a dashed container, while Langfuse collects traces from FastAPI. The dotted lines represent helper actions such as triggering categorization and reindexing on startup, which fits standard architecture-diagram conventions for showing system structure and data flow.
 
 ---
 
