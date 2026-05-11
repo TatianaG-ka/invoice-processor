@@ -20,7 +20,7 @@ COST_PER_CALL_USD = 0.000156
 
 def render(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    d = payload["candidate"] if "candidate" in payload else payload
+    d = payload.get("candidate", payload)
 
     print()
     print("=== Categorization Eval Results ===")

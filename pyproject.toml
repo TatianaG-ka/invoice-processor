@@ -1,0 +1,270 @@
+# ============================================================================
+#  invoice-processor — single source of truth for build, deps, lint, test.
+# ============================================================================
+#  Consolidates the 4 previous top-level config files into one:
+#    - requirements.txt       -> [project.dependencies]
+#    - requirements-dev.txt   -> [project.optional-dependencies.dev]
+#    - ruff.toml              -> [tool.ruff] + [tool.ruff.lint] + [tool.ruff.format]
+#    - pytest.ini             -> [tool.pytest.ini_options]
+# ============================================================================
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ----------------------------------------------------------------------------
+#  Project metadata — what `pip show` and PyPI would display.
+#  The service isn't intended for PyPI publication; this metadata serves
+#  package discovery (e.g. `pip install -e .` in CI / Docker) and tooling.
+# ----------------------------------------------------------------------------
+[project]
+name = "invoice-processor"
+version = "0.6.0"
+description = "KSeF-compatible invoice intelligence microservice with FastAPI, async processing, and RAG-based categorization."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11,<3.14"  # 3.13 works locally on Windows via greenlet==3.4.0; Cloud Run uses 3.11 (Dockerfile)
+authors = [
+    { name = "Tatiana Golińska" },
+]
+keywords = ["invoice", "ksef", "fastapi", "rag", "openai", "polish-tax"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+
+# ----------------------------------------------------------------------------
+#  Runtime dependencies — pin-equal versions match the prior requirements.txt
+#  exactly. Pinned (==) rather than caret (^) because the multi-stage Docker
+#  image is the deployment unit and reproducibility wins over forward-compat.
+#  When upgrading, bump here and re-run the full test suite + smoke test.
+# ----------------------------------------------------------------------------
+dependencies = [
+    # --- HTTP layer ---
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "python-multipart==0.0.12",
+
+    # --- PDF text extraction ---
+    "pdfplumber==0.11.4",
+
+    # --- OCR fallback (scanned PDFs) ---
+    "pytesseract==0.3.13",
+    "pdf2image==1.17.0",
+    "Pillow==11.0.0",
+
+    # --- LLM extraction + categorization ---
+    "openai==1.51.0",
+
+    # --- KSeF XML parser (dual FA(2) / FA(3) schemas) ---
+    "lxml==5.3.0",  # XPath + namespace handling for KSeF
+
+    # --- Persistence (async SQLAlchemy 2.0, no Alembic — see ADR-002) ---
+    "sqlalchemy==2.0.35",
+    "asyncpg==0.30.0",       # async Postgres driver (prod)
+    "aiosqlite==0.20.0",     # async SQLite for in-memory test DB
+    "greenlet==3.4.0",       # required by SQLAlchemy async on CPython 3.13 Windows
+
+    # --- Config / env ---
+    "pydantic-settings==2.5.2",
+    "python-dotenv==1.0.1",
+
+    # --- Background queue (Redis + RQ) ---
+    "redis==5.1.1",
+    "rq==2.0.0",
+
+    # --- Vector search (Qdrant + sentence-transformers) ---
+    "qdrant-client==1.11.3",
+    "sentence-transformers==3.1.1",
+
+    # --- Transformers runtime (sentence-transformers backend) ---
+    "transformers==4.45.2",
+    "torch==2.4.1",
+
+    # --- Observability ---
+    "langfuse==2.60.0",  # pinned to 2.x — decorator API moved in 3.x
+
+    # --- Utilities ---
+    "httpx==0.27.2",     # also used by scripts/eval_categorization.py
+    "tenacity==9.0.0",   # retry logic
+]
+
+# ----------------------------------------------------------------------------
+#  Optional dependency groups.
+#    pip install -e ".[dev]"   # install everything for local development
+#    pip install -e ".[test]"  # CI-only: tests + minimal lint, no formatter
+#  The split lets CI pull a smaller set when running pytest, and keeps the
+#  "what is needed for a green build" list explicit.
+# ----------------------------------------------------------------------------
+[project.optional-dependencies]
+test = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "pytest-cov==5.0.0",
+    "fakeredis==2.25.1",       # offline Redis for hermetic tests
+    # httpx is in [dependencies] already — used by both runtime and tests
+]
+dev = [
+    # Everything in [test], plus:
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "pytest-cov==5.0.0",
+    "fakeredis==2.25.1",
+    # Linters / formatters / type-checkers:
+    "ruff==0.6.9",
+    "black==24.10.0",
+    "mypy==1.11.2",
+]
+
+[project.urls]
+Repository = "https://github.com/TatianaG-ka/invoice-processor"
+Issues     = "https://github.com/TatianaG-ka/invoice-processor/issues"
+Live-Demo  = "https://invoice-processor-510066601703.europe-central2.run.app/docs"
+
+# ----------------------------------------------------------------------------
+#  Package discovery — tell setuptools where the source actually lives.
+#  Without this, `pip install -e .` tries to package `tests/`, `scripts/`,
+#  `docs/`, and `n8n/` too. Restricting to `app*` keeps the install clean.
+# ----------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "scripts*", "docs*", "n8n*"]
+
+# ============================================================================
+#  Ruff — linter + formatter. Migrated from ruff.toml verbatim, with one
+#  added section ([tool.ruff.lint.isort]) to make import sorting deterministic
+#  across environments (ruff 0.6 changed defaults).
+# ============================================================================
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist", "n8n"]  # n8n/ holds JSON, not Python
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import sorting)
+    "B",    # flake8-bugbear (common bugs)
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long — sometimes you just can't break a URL or a SQL string
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*"   = ["S101"]              # `assert` is fine in tests
+"scripts/*" = ["T201", "S101"]      # `print()` and `assert` are fine in scripts
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]         # `from app...` always groups separately
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ============================================================================
+#  Pytest — migrated from pytest.ini. Sensible defaults for an async FastAPI
+#  service: asyncio_mode=auto means `async def test_*` works without
+#  per-test @pytest.mark.asyncio. testpaths bounds discovery so pytest doesn't
+#  walk into docs/ or n8n/ looking for tests.
+# ============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"  # silence pytest-asyncio 0.24 warning
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",                       # show short summary for all non-pass outcomes
+    "--strict-markers",          # typo in @pytest.mark.foo => loud error
+    "--strict-config",           # typo in this section => loud error
+    "--showlocals",              # show local variables in tracebacks
+    "--tb=short",                # short tracebacks for readability in CI logs
+]
+filterwarnings = [
+    # Pin Pydantic v2 deprecation warnings as errors so we catch v3 prep work early.
+    "error::DeprecationWarning:pydantic.*",
+    # Silence noise from third-party libs we don't control.
+    "ignore::DeprecationWarning:passlib.*",
+    "ignore::DeprecationWarning:google.*",
+]
+markers = [
+    "slow: tests that hit external services or take >1s (excluded from default run)",
+    "live: tests that require a running Cloud Run revision (manual only)",
+]
+
+# ============================================================================
+#  Coverage — wired up so `pytest --cov` (already in the test script) produces
+#  consistent reports. Source = app/ only; tests, scripts, and docs don't need
+#  coverage of themselves.
+# ============================================================================
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "app/main.py",          # FastAPI entrypoint — covered indirectly by test client
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+precision = 1
+show_missing = true
+skip_covered = false
+
+# ============================================================================
+#  Mypy — optional type-checking gate. Not in CI today; kept here so a future
+#  `mypy app/` invocation has consistent settings across machines.
+# ============================================================================
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true
+# Start lenient and tighten as the codebase stabilises:
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+# Third-party libs without good stubs:
+[[tool.mypy.overrides]]
+module = [
+    "pdfplumber.*",
+    "pytesseract.*",
+    "pdf2image.*",
+    "qdrant_client.*",
+    "sentence_transformers.*",
+    "transformers.*",
+    "fakeredis.*",
+    "rq.*",
+]
+ignore_missing_imports = true
+
+# ============================================================================
+#  Black — kept for parity with the prior dev dependency list. Ruff's
+#  formatter is now the primary; black stays as a fallback for editor
+#  integrations that don't yet support ruff format.
+# ============================================================================
+[tool.black]
+line-length = 100
+target-version = ["py311"]
