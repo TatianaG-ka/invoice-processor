@@ -1,0 +1,117 @@
+[
+  {
+    "id": "it_saas_01",
+    "expected": "Usługi IT i oprogramowanie",
+    "seller": "CloudWorks Sp. z o.o.",
+    "seller_nip": "1111111111",
+    "lines": [
+      {"desc": "Subskrypcja SaaS plan Business - listopad 2026", "qty": 1, "net": "850.00"}
+    ],
+    "intent": "Clearest IT signal — single SaaS line item, no ambiguity."
+  },
+  {
+    "id": "it_hosting_02",
+    "expected": "Usługi IT i oprogramowanie",
+    "seller": "Hostimax Sp. z o.o.",
+    "seller_nip": "2222222222",
+    "lines": [
+      {"desc": "Hosting serwerow dedykowanych - listopad 2026", "qty": 1, "net": "1240.00"},
+      {"desc": "Domena .pl - odnowienie roczne", "qty": 1, "net": "60.00"}
+    ],
+    "intent": "Tests whether 'hosting' alone is enough signal (no SaaS keyword in line items)."
+  },
+  {
+    "id": "consulting_business_01",
+    "expected": "Konsulting i doradztwo",
+    "seller": "BusinessConsulting Partners s.c.",
+    "seller_nip": "3333333333",
+    "lines": [
+      {"desc": "Doradztwo biznesowe - 10 godzin", "qty": 10, "net": "300.00"}
+    ],
+    "intent": "Clearest consulting signal — explicit 'doradztwo biznesowe'."
+  },
+  {
+    "id": "consulting_tax_02",
+    "expected": "Konsulting i doradztwo",
+    "seller": "TaxAdvisory Group Sp. z o.o.",
+    "seller_nip": "4444444444",
+    "lines": [
+      {"desc": "Doradztwo podatkowe - audyt rozliczen Q3 2026", "qty": 1, "net": "2800.00"}
+    ],
+    "intent": "Tests whether 'tax advisory' generalises beyond business consulting (different domain, same category)."
+  },
+  {
+    "id": "marketing_ads_01",
+    "expected": "Marketing i reklama",
+    "seller": "AdGrowth Media Sp. z o.o.",
+    "seller_nip": "5555555555",
+    "lines": [
+      {"desc": "Kampania Google Ads - budzet listopad 2026", "qty": 1, "net": "4200.00"}
+    ],
+    "intent": "Tests platform-branded marketing line items (Google Ads = recognizable platform name)."
+  },
+  {
+    "id": "marketing_agency_02",
+    "expected": "Marketing i reklama",
+    "seller": "Creative Agency Warszawa Sp. z o.o.",
+    "seller_nip": "6666666666",
+    "lines": [
+      {"desc": "Obsluga marketingowa - retainer miesieczny", "qty": 1, "net": "3500.00"},
+      {"desc": "Produkcja kreacji graficznych - 5 sztuk", "qty": 5, "net": "200.00"}
+    ],
+    "intent": "Tests service-based marketing (no platform keyword, agency retainer + creative production)."
+  },
+  {
+    "id": "office_paper_01",
+    "expected": "Materiały biurowe",
+    "seller": "Papier-Bis S.A.",
+    "seller_nip": "7777777777",
+    "lines": [
+      {"desc": "Papier ksero A4 80g - 10 ryz", "qty": 10, "net": "22.00"},
+      {"desc": "Dlugopisy niebieskie - opakowanie 50 szt", "qty": 2, "net": "35.00"},
+      {"desc": "Segregatory A4 - 20 szt", "qty": 20, "net": "8.50"}
+    ],
+    "intent": "Classic office supplies — paper, pens, folders. Tests bulk OFFICE category signal."
+  },
+  {
+    "id": "office_toner_02",
+    "expected": "Materiały biurowe",
+    "seller": "PrintTech Supplies Sp. z o.o.",
+    "seller_nip": "8888888888",
+    "lines": [
+      {"desc": "Toner do drukarki HP LaserJet - czarny", "qty": 4, "net": "180.00"}
+    ],
+    "intent": "Tests semantic-vs-keyword discrimination: 'toner' is the search example used in the README. Could be confused with EQUIPMENT (printer accessory). Ground truth = OFFICE (consumable, not hardware)."
+  },
+  {
+    "id": "transport_courier_01",
+    "expected": "Transport i logistyka",
+    "seller": "SwiftCourier Polska Sp. z o.o.",
+    "seller_nip": "9999999999",
+    "lines": [
+      {"desc": "Uslugi kurierskie - listopad 2026, paczki krajowe", "qty": 1, "net": "780.00"}
+    ],
+    "intent": "Transport signal — courier service aggregated monthly invoice."
+  },
+  {
+    "id": "equipment_laptop_01",
+    "expected": "Sprzęt i wyposażenie",
+    "seller": "TechRetail Polska Sp. z o.o.",
+    "seller_nip": "1234567890",
+    "lines": [
+      {"desc": "Laptop Dell Latitude 5540, i7/16GB/512GB SSD", "qty": 1, "net": "5600.00"}
+    ],
+    "intent": "Tests EQUIPMENT vs IT discrimination — laptop is hardware (EQUIPMENT), not software (IT). Plausible mis-categorization risk."
+  },
+  {
+    "id": "adversarial_erp_consulting_software_11",
+    "expected": "Usługi IT i oprogramowanie",
+    "seller": "ERP Consulting Solutions Sp. z o.o.",
+    "seller_nip": "9876543210",
+    "lines": [
+      {"desc": "Licencja oprogramowania ERP NetSuite - 24 miesiace", "qty": 1, "net": "12000.00"},
+      {"desc": "Konsulting wdrozeniowy ERP - 30 godzin", "qty": 30, "net": "100.00"}
+    ],
+    "intent": "ADVERSARIAL: 80% value = software license, 20% = consulting hours. Seller name says 'Consulting'. Ground truth = IT (line items dominated by software). Tests whether LLM uses line item proportions or surface seller-name keywords. Diagnostic test, not just accuracy bump."
+  }
+]

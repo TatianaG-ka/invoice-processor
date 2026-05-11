@@ -1,0 +1,148 @@
+{
+  "candidate": {
+    "url": "http://localhost:8000",
+    "n_total": 11,
+    "n_correct": 10,
+    "n_errors": 0,
+    "accuracy": 0.9090909090909091,
+    "latency_min_ms": 1632.5202000007266,
+    "latency_median_ms": 2497.405600000093,
+    "latency_max_ms": 7022.817999999461,
+    "confidence_mean_correct": 0.9,
+    "confidence_mean_wrong": 0.8,
+    "confidence_gap": 0.09999999999999998,
+    "estimated_cost_usd": 0.001716,
+    "per_category": {
+      "Usługi IT i oprogramowanie": {
+        "correct": 2,
+        "total": 3
+      },
+      "Konsulting i doradztwo": {
+        "correct": 2,
+        "total": 2
+      },
+      "Marketing i reklama": {
+        "correct": 2,
+        "total": 2
+      },
+      "Materiały biurowe": {
+        "correct": 2,
+        "total": 2
+      },
+      "Transport i logistyka": {
+        "correct": 1,
+        "total": 1
+      },
+      "Sprzęt i wyposażenie": {
+        "correct": 1,
+        "total": 1
+      }
+    },
+    "confusion_mismatches": {
+      "Usługi IT i oprogramowanie": {
+        "Konsulting i doradztwo": 1
+      }
+    },
+    "results": [
+      {
+        "fixture_id": "it_saas_01",
+        "expected": "Usługi IT i oprogramowanie",
+        "predicted": "Usługi IT i oprogramowanie",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 3034.039600000142,
+        "error": null
+      },
+      {
+        "fixture_id": "it_hosting_02",
+        "expected": "Usługi IT i oprogramowanie",
+        "predicted": "Usługi IT i oprogramowanie",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 7022.817999999461,
+        "error": null
+      },
+      {
+        "fixture_id": "consulting_business_01",
+        "expected": "Konsulting i doradztwo",
+        "predicted": "Konsulting i doradztwo",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 4615.575199999512,
+        "error": null
+      },
+      {
+        "fixture_id": "consulting_tax_02",
+        "expected": "Konsulting i doradztwo",
+        "predicted": "Konsulting i doradztwo",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 2369.814800000313,
+        "error": null
+      },
+      {
+        "fixture_id": "marketing_ads_01",
+        "expected": "Marketing i reklama",
+        "predicted": "Marketing i reklama",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 6162.5340999999025,
+        "error": null
+      },
+      {
+        "fixture_id": "marketing_agency_02",
+        "expected": "Marketing i reklama",
+        "predicted": "Marketing i reklama",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 2109.383799999705,
+        "error": null
+      },
+      {
+        "fixture_id": "office_paper_01",
+        "expected": "Materiały biurowe",
+        "predicted": "Materiały biurowe",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 2497.405600000093,
+        "error": null
+      },
+      {
+        "fixture_id": "office_toner_02",
+        "expected": "Materiały biurowe",
+        "predicted": "Materiały biurowe",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 1887.8732000002856,
+        "error": null
+      },
+      {
+        "fixture_id": "transport_courier_01",
+        "expected": "Transport i logistyka",
+        "predicted": "Transport i logistyka",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 2618.9354999996795,
+        "error": null
+      },
+      {
+        "fixture_id": "equipment_laptop_01",
+        "expected": "Sprzęt i wyposażenie",
+        "predicted": "Sprzęt i wyposażenie",
+        "confidence": 0.9,
+        "correct": true,
+        "latency_ms": 1632.5202000007266,
+        "error": null
+      },
+      {
+        "fixture_id": "adversarial_erp_consulting_software_11",
+        "expected": "Usługi IT i oprogramowanie",
+        "predicted": "Konsulting i doradztwo",
+        "confidence": 0.8,
+        "correct": false,
+        "latency_ms": 2180.8977000000596,
+        "error": null
+      }
+    ]
+  }
+}
