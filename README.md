@@ -1,6 +1,6 @@
 # Invoice Processor
 
-> **KSeF-compatible invoice intelligence microservice.** Ingest a Polish invoice (PDF or KSeF XML), extract structured fields with an LLM, persist to Postgres, make the archive semantically searchable.
+> **KSeF-compatible invoice intelligence microservice.** Ingest a Polish invoice (PDF or KSeF XML), extract structured fields with an LLM, persist to Postgres, make the archive semantically searchable, and categorize via RAG over historical neighbours — all wrapped in production AI observability with per-call cost tracking.
 
 ## 🚀 Try it live (interactive Swagger UI, ~30 seconds)
 
@@ -11,6 +11,21 @@ Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal
 > ⚠️ **First request may take ~10s** — Cloud Run cold start with `min-instances=0` (free-tier hosting). Retry once and it wakes up; subsequent calls respond in milliseconds.
 
 ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
+
+---
+
+## Why I built this  
+
+**KSeF XML becomes legally mandatory for all Polish B2B businesses in April 2026** (large taxpayers above PLN 200M revenue went live in February 2026). This translates to ~1.4M companies × ~1000 invoices/year = a structural compliance gap where **n8n + AI + observability** can replace manual copy-paste from PDF to Excel.
+
+This project is intentionally scoped as a **flagship portfolio piece** demonstrating four capabilities that rarely co-exist in a single repo:
+
+1. **Production deploy** — Cloud Run + multi-stage Docker + GitHub Actions CI with a live URL anyone can hit
+2. **Polish regulatory compliance** — KSeF dual-schema FA(2) legacy + FA(3) current, against the real `crd.gov.pl` namespace
+3. **AI observability with cost tracking** — Langfuse `@observe` on both LLM paths, measured $0.000156–$0.000274 / call
+4. **Hybrid storage strategy** — Postgres as source of truth + Qdrant as refreshable embedding projection + Redis as idempotency cache
+
+Each one alone is a "deployed demo." Together they make a "production-ready microservice."
 
 ---
 
@@ -29,8 +44,7 @@ Polish businesses receive 60–100 invoices per month across three shapes: scann
 <img width="960" height="924" alt="invoice_processing_architecture" src="https://github.com/user-attachments/assets/e7be2ffa-bbf2-4c99-87c6-c682b730e7db" />
 
 
-**The diagram shows the full flow:** the client/n8n sends requests to FastAPI, which either queues work through Redis + RQ, where the worker performs OCR and extraction with OpenAI, or parses KSeF XML directly. The result, ExtractedInvoice, is written in parallel to PostgreSQL and Qdrant; categorization uses RAG, with Qdrant neighbors passed as few-shot examples to OpenAI, and the result is stored back in PostgreSQL.
-Everything runs inside Cloud Run, shown as a dashed container, while Langfuse collects traces from FastAPI. The dotted lines represent helper actions such as triggering categorization and reindexing on startup, which fits standard architecture-diagram conventions for showing system structure and data flow.
+**The diagram shows the full flow:** the client/n8n sends requests to FastAPI, which either queues work through Redis + RQ (where the worker performs OCR and extraction with OpenAI) or parses KSeF XML directly. The result, ExtractedInvoice, is written in parallel to PostgreSQL and Qdrant; categorization uses RAG, with Qdrant neighbours passed as few-shot examples to OpenAI, and the result is stored back in PostgreSQL. Everything runs inside Cloud Run, while Langfuse collects traces from FastAPI. The dotted lines represent helper actions such as triggering categorization and reindexing on startup.
 
 ---
 
@@ -44,8 +58,8 @@ Everything runs inside Cloud Run, shown as a dashed container, while Langfuse co
 | Background queue | Redis + RQ 2.0 | `POST /invoices` (PDF) enqueues, worker does extract + persist + index |
 | PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically |
 | KSeF XML | lxml with dual-schema support | FA(2) legacy + FA(3) `http://crd.gov.pl/wzor/2025/06/25/13775/` |
-| LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.0003/call |
-| LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ~$0.00016/call |
+| LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.000274/call |
+| LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ~$0.000156/call |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
 | Observability | Langfuse Cloud | `@observe` on OpenAI calls (extraction + categorization), token/cost tracking |
 | Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 155 tests, ~5 s full run |
@@ -117,6 +131,160 @@ The full live API surface is browsable at [`/docs`](https://invoice-processor-51
 
 ---
 
+## Evaluation
+
+The service has three AI/ML components, and only one of them gets formally
+evaluated against ground truth. That's a deliberate choice, not a gap:
+
+| Component | Endpoint | Why eval makes sense here? |
+|---|---|---|
+| **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef`, `POST /invoices` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 155 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
+| **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search?q=...` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to a 15-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
+| **LLM categorization (RAG)** | `POST /invoices/{id}/categorize` | **Yes — this is what `scripts/eval_categorization.py` measures.** |
+
+Categorization is the component where the LLM actually makes a discrete
+decision against a finite set of categories — ground truth is naturally binary
+("this invoice is consulting"), and downstream stakes are real (ledger coding,
+expense-policy reporting). It's also the only path where prompt or model
+changes can silently regress without unit tests catching it. That's where eval
+earns its keep.
+
+### How it works
+
+```bash
+# Local API (requires docker-compose up first)
+python scripts/eval_categorization.py
+
+# Live Cloud Run revision
+BASE_URL=https://invoice-processor-510066601703.europe-central2.run.app \
+    python scripts/eval_categorization.py
+
+# Persist results for the commit log
+python scripts/eval_categorization.py --out docs/eval/run_$(date +%Y_%m_%d).json
+```
+
+The script uploads each labeled fixture via `POST /invoices/ksef`, then
+categorizes via `POST /invoices/{id}/categorize?force=true` to bypass the DB
+cache (ADR-007) and measure the LLM on every call. It exercises the full
+production code path: embed target → Qdrant top-3 → few-shot prompt →
+`gpt-4o-mini` Structured Outputs → persisted category.
+
+### What it reports
+
+- **Top-1 accuracy** (exact category match against ground truth)
+- **Confusion matrix** (which categories get confused with which)
+- **Confidence calibration** — mean confidence on correct vs incorrect predictions. A gap ≥ 0.05 means the `confidence` field is usable as a human-review threshold; below that, the signal is too noisy and prompt-tuning should target it first
+- **Estimated cost** (N × $0.000156, reconcilable to Langfuse)
+
+### Latest run
+
+> Replace this table after running the eval. Values below are placeholders.
+
+| Metric | Value |
+|---|---|
+| Fixtures | 15 (10 categories, 1 adversarial) |
+| Accuracy | _populate after run_ |
+| Mean confidence on correct predictions | _populate after run_ |
+| Mean confidence on incorrect predictions | _populate after run_ |
+| Calibration gap | _populate after run_ |
+| Cost per eval run | ~$0.0023 (15 × $0.000156) |
+
+### A/B testing prompt or model changes
+
+The script supports comparing two revisions side-by-side — useful when
+iterating on the few-shot prompt, swapping models, or testing a new
+embedding:
+
+```bash
+# Deploy a new revision with --no-traffic, then compare:
+python scripts/eval_categorization.py \
+    --base-url https://invoice-processor-PREVIEW.run.app \
+    --baseline https://invoice-processor-510066601703.europe-central2.run.app
+```
+
+Output highlights **fixed** (was wrong, now right) and **regressed** (was right,
+now wrong) invoices per fixture, so a "+2% accuracy" headline doesn't hide
+catastrophic regressions on individual categories — averages are easy to game,
+flips aren't.
+
+### Fixture set design
+
+15 labeled synthetic KSeF FA(3) invoices under
+[`tests/fixtures/labeled/`](tests/fixtures/labeled/), covering 10 categories:
+
+- Usługi IT i oprogramowanie · Konsulting i doradztwo · Materiały biurowe
+- Marketing i reklama · Usługi telekomunikacyjne · Media i opłaty
+- Usługi prawne · Transport i logistyka · Sprzęt i wyposażenie · Szkolenia i rozwój
+
+Categories with 2 fixtures each (IT, consulting, office supplies, marketing)
+test whether the model generalises within the category — e.g. "Google Ads
+spend" and "Marketing agency retainer" are both marketing but look very
+different to a sentence embedder.
+
+One fixture is **deliberately adversarial**
+(`ambiguous_consulting_software_01.xml` — "ERP Consulting & Software" seller
+with both ERP licence and implementation hours as line items). Ground truth is
+"Usługi IT" because 80% of the invoice value is software. This tests whether
+RAG neighbours and line-item value dominate over surface keywords in the
+seller name — a failure here means the model is taking shortcuts, even when
+overall accuracy looks good.
+
+Ground truth and rationale are documented inline in
+[`tests/fixtures/labeled_invoices.json`](tests/fixtures/labeled_invoices.json).
+
+The fixture set is intentionally small — 15 invoices is enough to detect
+prompt regressions but small enough that a full eval run costs <$0.003 and
+takes ~60 seconds. Grow the fixture pool when categorization moves past demo
+scope.
+
+### Generating / regenerating fixtures
+
+The XML fixtures are generated from the JSON manifest by a small script:
+
+```bash
+python scripts/generate_eval_fixtures.py
+```
+
+Each fixture gets a category-appropriate seller name, line items, and realistic
+amounts (from 492 PLN telecom to 18 450 PLN ERP). Idempotent — re-run after
+editing the manifest to refresh the XML pool. All NIPs pass checksum but match
+no real entity.
+
+### CI gate (optional, not enabled by default)
+
+The script exits non-zero if accuracy falls below `$EVAL_ACCURACY_FLOOR`
+(default `0.60`). To gate deploys on eval accuracy:
+
+```yaml
+- name: Eval categorization accuracy
+  env:
+    BASE_URL: ${{ steps.deploy.outputs.preview_url }}
+    EVAL_ACCURACY_FLOOR: "0.80"
+  run: python scripts/eval_categorization.py
+```
+
+Not enabled in CI by default — each eval run consumes real OpenAI tokens and
+shouldn't fire on every PR. Trigger manually or only on `main` deploys, and
+only if you've sized the fixture set up to something that warrants protection
+(15 fixtures is a smoke-eval, not a regression gate).
+
+### What this doesn't measure (and why)
+
+To be explicit about scope:
+
+- **Extraction accuracy for PDF path** — the OCR + LLM extraction code exists
+  and is unit-tested, but the worker isn't deployed in prod. Eval would be
+  meaningful here and is the natural next step if the PDF endpoint goes live
+- **Semantic search relevance** — needs a larger fixture set with labeled
+  query→relevance pairs. Not blocked technically, just outside demo scope
+- **End-to-end pipeline accuracy** (n8n → KSeF parse → categorize) — covered
+  by the smoke test (`scripts/smoke_test_prod.sh`) for happy-path behaviour,
+  but not for "did each step return the *right* result." Would compose
+  naturally on top of per-component evals once they exist
+
+
+---
+
 ## Pipeline integration (n8n)
 
 The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbox poll. Two workflows are exported under [`n8n/`](n8n/):
@@ -152,44 +320,44 @@ The service degrades gracefully when Langfuse keys are absent: the decorator see
 ## Architecture decisions
 
 ### ADR-001 — Async SQLAlchemy 2.0 + asyncpg
-**Context:** FastAPI endpoints are async-native; a sync DB driver would either block the event loop or force thread-pool offload on every query.
-**Decision:** `create_async_engine` + `AsyncSession` throughout. `_prepare_async_url()` auto-rewrites `postgresql://…?sslmode=require` into the asyncpg-friendly shape (prefix swap + `connect_args={"ssl": "require"}`) so the Neon connection string can be pasted verbatim from the dashboard.
-**Consequence:** One concurrency model end-to-end. Sessions travel through FastAPI dependency injection in HTTP paths; the RQ worker owns its own sessionmaker for background jobs.
+**Context:** FastAPI endpoints are async-native; a sync DB driver would either block the event loop or force thread-pool offload on every query.  
+**Decision:** `create_async_engine` + `AsyncSession` throughout. `_prepare_async_url()` auto-rewrites `postgresql://…?sslmode=require` into the asyncpg-friendly shape (prefix swap + `connect_args={"ssl": "require"}`) so the Neon connection string can be pasted verbatim from the dashboard.    
+**Consequence:** One concurrency model end-to-end. Sessions travel through FastAPI dependency injection in HTTP paths; the RQ worker owns its own sessionmaker for background jobs.  
 
 ### ADR-002 — No Alembic
-**Context:** Portfolio scope is one service, one schema, append-mostly workload. Alembic adds ceremony without payback.
-**Decision:** `Base.metadata.create_all(checkfirst=True)` runs in the FastAPI lifespan. Safe on every container start — SQLAlchemy's default `checkfirst` will not recreate existing tables.
-**Consequence:** No migration file to maintain, but also no schema-change safety net. Revisit if the row count grows past the demo's "hundreds" bound or if multiple instances need coordinated DDL.
+**Context:** Portfolio scope is one service, one schema, append-mostly workload. Alembic adds ceremony without payback.  
+**Decision:** `Base.metadata.create_all(checkfirst=True)` runs in the FastAPI lifespan. Safe on every container start — SQLAlchemy's default `checkfirst` will not recreate existing tables.  
+**Consequence:** No migration file to maintain, but also no schema-change safety net. Revisit if the row count grows past the demo's "hundreds" bound or if multiple instances need coordinated DDL.  
 
 ### ADR-003 — Dual KSeF schema (FA(2) legacy + FA(3) current)
-**Context:** The Polish Ministry of Finance rolled out FA(3) (`http://crd.gov.pl/wzor/2025/06/25/13775/`) as the mandatory format for large taxpayers (>PLN 200M revenue) from **February 2026**, with the universal B2B obligation following in **April 2026**. FA(2) documents will continue to exist in archives and email traffic for years.
-**Decision:** `parse_ksef()` sniffs the root namespace and dispatches to one of two parsers. Both produce the same `ExtractedInvoice` domain model, so no downstream code knows which shape arrived.
-**Consequence:** Ingestion accepts both shapes today; dropping FA(2) later is a one-function delete.
+**Context:** The Polish Ministry of Finance rolled out FA(3) (`http://crd.gov.pl/wzor/2025/06/25/13775/`) as the mandatory format for large taxpayers (>PLN 200M revenue) from **February 2026**, with the universal B2B obligation following in **April 2026**. FA(2) documents will continue to exist in archives and email traffic for years.  
+**Decision:** `parse_ksef()` sniffs the root namespace and dispatches to one of two parsers. Both produce the same `ExtractedInvoice` domain model, so no downstream code knows which shape arrived.  
+**Consequence:** Ingestion accepts both shapes today; dropping FA(2) later is a one-function delete.  
 
 ### ADR-004 — Embedded Qdrant + reindex-on-startup
-**Context:** Cloud Run has ephemeral container storage — anything written to the filesystem disappears on instance replacement. An external vector store (Qdrant Cloud) would solve persistence but adds a moving part to a portfolio demo.
-**Decision:** Ship Qdrant in-process (`QdrantClient(":memory:")`), and on every cold start walk every invoice in Postgres through `index_invoice` to rebuild the index. Postgres is the durable system of record; Qdrant is refreshable.
-**Consequence:** Zero external search dependency; bounded by "hundreds of rows fit comfortably in memory." A production-scale variant would swap `:memory:` for `file://` on a mounted volume, or an external Qdrant — the wrapper already supports all three shapes via `_build_client()`.
+**Context:** Cloud Run has ephemeral container storage — anything written to the filesystem disappears on instance replacement. An external vector store (Qdrant Cloud) would solve persistence but adds a moving part to a portfolio demo.  
+**Decision:** Ship Qdrant in-process (`QdrantClient(":memory:")`), and on every cold start walk every invoice in Postgres through `index_invoice` to rebuild the index. Postgres is the durable system of record; Qdrant is refreshable.  
+**Consequence:** Zero external search dependency; bounded by "hundreds of rows fit comfortably in memory." A production-scale variant would swap `:memory:` for `file://` on a mounted volume, or an external Qdrant — the wrapper already supports all three shapes via `_build_client()`.  
 
 ### ADR-005 — Best-effort indexing, fail-loud persistence
-**Context:** Two side stores get written on a successful ingest — Postgres (rows) and Qdrant (vectors). Coupling their availability would mean a vector-store blip causes lost invoices.
-**Decision:** The repository `save` is on the critical path — a `SQLAlchemyError` propagates as `503`. `index_invoice` is wrapped in `try/except Exception → log + return False`: a broken embedder or a Qdrant outage degrades search coverage but never breaks the write path.
-**Consequence:** The DB is the source of truth; the vector store is a secondary projection that can always be rebuilt. Matches the reindex-on-startup contract from ADR-004.
+**Context:** Two side stores get written on a successful ingest — Postgres (rows) and Qdrant (vectors). Coupling their availability would mean a vector-store blip causes lost invoices.  
+**Decision:** The repository `save` is on the critical path — a `SQLAlchemyError` propagates as `503`. `index_invoice` is wrapped in `try/except Exception → log + return False`: a broken embedder or a Qdrant outage degrades search coverage but never breaks the write path.  
+**Consequence:** The DB is the source of truth; the vector store is a secondary projection that can always be rebuilt. Matches the reindex-on-startup contract from ADR-004.  
 
 ### ADR-006 — Redis idempotency on `POST /invoices/ksef`
-**Context:** KSeF invoices arrive in bursts (n8n batches, retried HTTP timeouts). A retried POST of the same invoice should not parse and persist twice — that would double-count totals in downstream registers and double-fire Slack alerts.
-**Decision:** Before parsing, hash the request to a `(seller_nip, invoice_number)` pair (Polish tax law guarantees this is unique per invoice forever) and `GET` the key from a managed Redis (Upstash in production, fakeredis under tests). Hit → return the originally-stored row with `200 OK` and the same `id`. Miss → save, then `SET key=invoice_id EX 86400` so the next 24h of retries are no-ops. A separate `IDEMPOTENCY_REDIS_URL` keeps this keyspace independent of the queue's Redis.
-**Consequence:** `201 Created` (first time) and `200 OK` (cached) are both happy responses; consumers don't have to special-case status. Best-effort by design — a Redis outage logs a warning and falls through to a normal save (worse latency, possible duplicates during the outage window, but no failed requests). Tests cover both the cached-hit path and the Redis-outage fallthrough.
+**Context:** KSeF invoices arrive in bursts (n8n batches, retried HTTP timeouts). A retried POST of the same invoice should not parse and persist twice — that would double-count totals in downstream registers and double-fire Slack alerts.  
+**Decision:** Before parsing, hash the request to a `(seller_nip, invoice_number)` pair (Polish tax law guarantees this is unique per invoice forever) and `GET` the key from a managed Redis (Upstash in production, fakeredis under tests). Hit → return the originally-stored row with `200 OK` and the same `id`. Miss → save, then `SET key=invoice_id EX 86400` so the next 24h of retries are no-ops. A separate `IDEMPOTENCY_REDIS_URL` keeps this keyspace independent of the queue's Redis.  
+**Consequence:** `201 Created` (first time) and `200 OK` (cached) are both happy responses; consumers don't have to special-case status. Best-effort by design — a Redis outage logs a warning and falls through to a normal save (worse latency, possible duplicates during the outage window, but no failed requests). Tests cover both the cached-hit path and the Redis-outage fallthrough.  
 
 ### ADR-007 — DB-cached LLM categorization (RAG + idempotency by default)
-**Context:** Once an invoice is in the system, the next question is "what kind of expense is it?" — needed for ledger coding, expense-policy reporting, and downstream analytics. A pure-LLM endpoint would (a) cost a real-money OpenAI call on every request, even for invoices that haven't changed, and (b) miss the signal already in Qdrant: invoices similar to this one have *already* been categorized by a human or a prior LLM run.
-**Decision:** `POST /invoices/{id}/categorize` runs a small RAG flow — embed target → Qdrant top-3 already-categorized neighbours → few-shot prompt → `gpt-4o-mini` Structured Outputs → persist `category` + `category_confidence` to the `invoices` row. Subsequent calls return the persisted value with `cached=true` and `200 OK` (no LLM hit), mirroring the idempotency contract from ADR-006. `?force=true` overrides the cache for prompt-engineering iterations. Schema migration (two new columns + index) is applied via [`scripts/migrate_add_category.sql`](scripts/migrate_add_category.sql) — idempotent `IF NOT EXISTS` — because ADR-002 explicitly defers Alembic; for the demo's "few-tables, append-mostly" shape, raw SQL scripts under `scripts/` are the canonical migration channel.
-**Consequence:** Re-categorization is free (DB read), and prompt changes can be A/B-tested via `?force=true` without touching the schema. The persisted `reasoning` is intentionally not stored — only `category` + `confidence` — to keep the row narrow; the reasoning lives in the response of the originating call and (with full prompt + output) in the Langfuse trace. Operational caveat: the categorize path needs Qdrant ready, so the first call after a cold start can hit the reindex window (see Known limitations below).
+**Context:** Once an invoice is in the system, the next question is "what kind of expense is it?" — needed for ledger coding, expense-policy reporting, and downstream analytics. A pure-LLM endpoint would (a) cost a real-money OpenAI call on every request, even for invoices that haven't changed, and (b) miss the signal already in Qdrant: invoices similar to this one have *already* been categorized by a human or a prior LLM run.  
+**Decision:** `POST /invoices/{id}/categorize` runs a small RAG flow — embed target → Qdrant top-3 already-categorized neighbours → few-shot prompt → `gpt-4o-mini` Structured Outputs → persist `category` + `category_confidence` to the `invoices` row. Subsequent calls return the persisted value with `cached=true` and `200 OK` (no LLM hit), mirroring the idempotency contract from ADR-006. `?force=true` overrides the cache for prompt-engineering iterations. Schema migration (two new columns + index) is applied via [`scripts/migrate_add_category.sql`](scripts/migrate_add_category.sql) — idempotent `IF NOT EXISTS` — because ADR-002 explicitly defers Alembic; for the demo's "few-tables, append-mostly" shape, raw SQL scripts under `scripts/` are the canonical migration channel.  
+**Consequence:** Re-categorization is free (DB read), and prompt changes can be A/B-tested via `?force=true` without touching the schema. The persisted `reasoning` is intentionally not stored — only `category` + `confidence` — to keep the row narrow; the reasoning lives in the response of the originating call and (with full prompt + output) in the Langfuse trace. Operational caveat: the categorize path needs Qdrant ready, so the first call after a cold start can hit the reindex window (see Known limitations below).  
 
 ### ADR-008 — n8n as a loose-coupled pipeline client
-**Context:** A real KSeF inbox simulation needs an orchestration layer that polls, fans out, retries, and alerts on errors. Building that into the FastAPI service would conflate API surface with workflow logic; a separate n8n instance keeps each side focused.
-**Decision:** Two exported workflows under [`n8n/`](n8n/) live alongside the service in the repo. The HTTP node uses `fullResponse: true` + `neverError: true` + `IF` `typeValidation: "loose"` so the API can return raw `201`/`200`/`4xx`/`5xx` without n8n auto-failing — the IF branch routes on `statusCode` instead. The `errorWorkflow` binding fans non-2xx outcomes to a `errors` audit sheet + Slack alert, and the main flow logs `processed_invoices` rows for successes. The API itself stays unaware of n8n: it returns standard HTTP and lets the caller decide retry / alert policy.
-**Consequence:** Either side can evolve without breaking the other — the API can change response shapes (additive), n8n can change credentials, schedules, or fan-outs without touching code. The trade-offs (statusCode-as-string from n8n's HTTP transport, errorWorkflow only firing on production runs not manual executions) are documented in [Pipeline integration (n8n)](#pipeline-integration-n8n) above so a recruiter or maintainer can re-import without trial-and-error.
+**Context:** A real KSeF inbox simulation needs an orchestration layer that polls, fans out, retries, and alerts on errors. Building that into the FastAPI service would conflate API surface with workflow logic; a separate n8n instance keeps each side focused.  
+**Decision:** Two exported workflows under [`n8n/`](n8n/) live alongside the service in the repo. The HTTP node uses `fullResponse: true` + `neverError: true` + `IF` `typeValidation: "loose"` so the API can return raw `201`/`200`/`4xx`/`5xx` without n8n auto-failing — the IF branch routes on `statusCode` instead. The `errorWorkflow` binding fans non-2xx outcomes to a `errors` audit sheet + Slack alert, and the main flow logs `processed_invoices` rows for successes. The API itself stays unaware of n8n: it returns standard HTTP and lets the caller decide retry / alert policy.  
+**Consequence:** Either side can evolve without breaking the other — the API can change response shapes (additive), n8n can change credentials, schedules, or fan-outs without touching code. The trade-offs (statusCode-as-string from n8n's HTTP transport, errorWorkflow only firing on production runs not manual executions) are documented in [Pipeline integration (n8n)](#pipeline-integration-n8n) above so a recruiter or maintainer can re-import without trial-and-error.  
 
 ---
 
@@ -200,7 +368,7 @@ These are deliberate trade-offs documented up-front. None block the demo; each h
 | Limitation | Impact | Why it's acceptable today | Path to fix |
 |---|---|---|---|
 | **Cold-start window on Cloud Run** (ADR-004 + 005) | First request after `--min-instances=0` idle can hit a 503 while Qdrant reindex from Postgres + MiniLM model load is in flight. Reproducible: a lone `?force=true` after 15 min idle returns 503; retrying 10 s later returns 201. | A demo deployment doesn't justify always-warm pricing. Cache-hit path (`/categorize` w/o `force`) is DB-only and survives even before Qdrant is ready. | `--min-instances=1` (paid), or migrate to external Qdrant Cloud (removes the reindex window entirely). |
-| **PDF endpoint isn't deployed in Cloud Run** | `POST /invoices` (PDF) requires the RQ worker + a worker-side Redis; the live demo runs only the API container, so PDF upload returns a job_id whose status will never advance. KSeF + categorize + search are demo-facing. | The PDF path is fully exercised by the test suite and `docker-compose.v2.yml`; deploying the worker would double infra cost for one extra ingestion path. | Spin a second Cloud Run service for the worker (same image, override the entrypoint to `rq worker default`) once volume warrants it. |
+| **PDF endpoint isn't deployed in Cloud Run** | `POST /invoices` (PDF) requires the RQ worker + a worker-side Redis; the live demo runs only the API container, so PDF upload returns a job_id whose status will never advance. KSeF + categorize + search are demo-facing. | The PDF path is fully exercised by the test suite and [`docker-compose.yml`](docker-compose.yml); deploying the worker would double infra cost (~$8/month for a second always-on Cloud Run service) for one extra ingestion path that doesn't affect the demo narrative. | Spin a second Cloud Run service for the worker (same image, override the entrypoint to `rq worker default`) once volume warrants it. |
 | **Langfuse Hobby tier — 30-day retention + variable flush latency** | Public dashboard URLs expire and traces older than 30 days are deleted. Flush latency from Cloud Run to Langfuse Cloud usually takes <60 s but has been observed up to ~20 min under load. | Static screenshots in [`docs/langfuse_*.png`](docs/) are checked in as permanent evidence. The service still works without Langfuse — keys absent → no-op decorator. | Upgrade to a paid Langfuse plan or self-host (the `@observe` instrumentation is portable). |
 
 ---
@@ -278,8 +446,10 @@ tests/                      # 155 tests, hermetic, ~5 s
 
 ## Author
 
-**Tatiana Golińska** — Workflow Automation Engineer (n8n, Python, AI integration)
+**Tatiana Golińska**
 [LinkedIn](https://www.linkedin.com/in/tatiana-golinska/)
+
+Built as a flagship portfolio project demonstrating production AI engineering patterns: live deploy, observability with cost tracking, RAG with idempotency, ADRs as first-class documentation, and hermetic testing.
 
 ---
 
