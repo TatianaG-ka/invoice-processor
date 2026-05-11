@@ -167,7 +167,9 @@ earns its keep.
 
 <img width="942" height="530" alt="eval_report" src="https://github.com/user-attachments/assets/c6a34218-9a5a-4634-aa8b-0d0b5e917ac0" />
 
+**Reconciled against Langfuse** — same eval run, captured in the cost dashboard: 11 traces, 22 observations (SPAN parent + GENERATION child per call), all `gpt-4o-mini`, $0.001878 cumulative. The 9 % delta against the $0.001716 baseline estimate is prompt-length variance per fixture (different KSeF XML → different token counts):
 
+![Langfuse cost dashboard for the eval run](docs/eval/langfuse_eval_cumulative_2.png)
 
 ### The one miss is the adversarial fixture (by design)
 
