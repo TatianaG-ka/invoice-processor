@@ -153,7 +153,7 @@ expense-policy reporting). It's also the only path where prompt or model
 changes can silently regress without unit tests catching it. That's where eval
 earns its keep.
 
-### Latest run ([`docs/eval/baseline_2026-05-11.json`](docs/eval/baseline_2026-05-11.json))
+### Latest run ([`eval_report'](docs/eval/baseline_2026-05-11.json))
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -163,7 +163,7 @@ earns its keep.
 | **Confidence calibration gap** | **+0.10** (mean correct 0.90 − mean wrong 0.80) | Sits exactly on the `≥ 0.10` "usable signal" threshold → at this calibration, confidence alone isn't enough to gate `auto-approve vs human-review` routing; needs prompt iteration or N>11 to firm up |
 | Cost per run | $0.001716 (11 × $0.000156) | Reconciled to per-call cost observed in Langfuse — see [`docs/langfuse_categorize_trace_detail.png`](docs/langfuse_categorize_trace_detail.png) (model `gpt-4o-mini`, 821 prompt → 55 completion tokens) |
 
-**Per-category accuracy** - see breakdown below:
+**Per-category accuracy** - see breakdown here:
 
 <img width="942" height="530" alt="eval_report" src="https://github.com/user-attachments/assets/c6a34218-9a5a-4634-aa8b-0d0b5e917ac0" />
 
