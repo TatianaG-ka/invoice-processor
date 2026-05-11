@@ -143,7 +143,7 @@ evaluated against ground truth. That's a deliberate choice, not a gap:
 | Component | Endpoint | Why eval makes sense here? |
 |---|---|---|
 | **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef`, `POST /invoices` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 155 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
-| **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search?q=...` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to a 15-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
+| **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search?q=...` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to an 11-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
 | **LLM categorization (RAG)** | `POST /invoices/{id}/categorize` | **Yes — this is what `scripts/eval_categorization.py` measures.** |
 
 Categorization is the component where the LLM actually makes a discrete
@@ -160,8 +160,8 @@ earns its keep.
 python scripts/eval_categorization.py
 
 # Live Cloud Run revision
-BASE_URL=https://invoice-processor-510066601703.europe-central2.run.app \
-    python scripts/eval_categorization.py
+python scripts/eval_categorization.py \
+    --url https://invoice-processor-510066601703.europe-central2.run.app
 
 # Persist results for the commit log
 python scripts/eval_categorization.py --out docs/eval/run_$(date +%Y_%m_%d).json
@@ -173,25 +173,30 @@ cache (ADR-007) and measure the LLM on every call. It exercises the full
 production code path: embed target → Qdrant top-3 → few-shot prompt →
 `gpt-4o-mini` Structured Outputs → persisted category.
 
+Enum literals (the strings in `expected`) are validated at startup against
+`app.schemas.category.InvoiceCategory` — any drift between manifest and source
+enum fails loud with exit 1 rather than silently miscounting predictions.
+
 ### What it reports
 
-- **Top-1 accuracy** (exact category match against ground truth)
-- **Confusion matrix** (which categories get confused with which)
-- **Confidence calibration** — mean confidence on correct vs incorrect predictions. A gap ≥ 0.05 means the `confidence` field is usable as a human-review threshold; below that, the signal is too noisy and prompt-tuning should target it first
-- **Estimated cost** (N × $0.000156, reconcilable to Langfuse)
+- **Top-1 accuracy** — exact category match against ground truth
+- **Per-category accuracy** — primary read for the recruiter / next maintainer (which categories work, which need prompt iteration)
+- **Confidence calibration gap** — mean confidence on correct vs incorrect predictions. A gap ≥ 0.10 means the `confidence` field is usable as an **auto-approve vs human-review routing threshold**; below that, the signal is too noisy and prompt-tuning should target calibration first
+- **Latency p50 / p95** — single-call latency distribution. p95 is the operationally meaningful number for cold-start sensitivity; with N=11 it's an outlier-detection proxy rather than a statistical percentile (small-N caveat)
+- **Confusion matrix** — only mismatches printed (the cells that matter for prompt iteration)
+- **Estimated cost** — N × $0.000156, reconciled to the Langfuse trace at [`docs/langfuse_categorize_trace_detail.png`](docs/langfuse_categorize_trace_detail.png) and to OpenAI billing
 
-### Latest run
+### Latest run (`docs/eval/run_<populate-date>.json`)
 
-> Replace this table after running the eval. Values below are placeholders.
+> Replace this table after running the eval. `<populate>` values come from the script's stdout.
 
-| Metric | Value |
-|---|---|
-| Fixtures | 15 (10 categories, 1 adversarial) |
-| Accuracy | _populate after run_ |
-| Mean confidence on correct predictions | _populate after run_ |
-| Mean confidence on incorrect predictions | _populate after run_ |
-| Calibration gap | _populate after run_ |
-| Cost per eval run | ~$0.0023 (15 × $0.000156) |
+| Metric | Value | Notes |
+|---|---|---|
+| Top-1 accuracy | `<populate>/11` (`<populate>%`) | Fresh LLM call per fixture (`?force=true` bypasses the ADR-007 DB cache) |
+| Per-category accuracy | see breakdown below | 6 categories — IT / CONSULTING / MARKETING / OFFICE / TRANSPORT / EQUIPMENT |
+| Latency | p50 = `<populate>` ms, p95 = `<populate>` ms | End-to-end including KSeF parse + Qdrant top-3 lookup + LLM round trip |
+| Confidence calibration gap | `<populate>` (mean correct − mean wrong) | `≥ 0.10` = "usable signal" for `auto-approve vs human-review` routing |
+| Cost per run | $0.001716 (11 × $0.000156) | Reconciled to Langfuse trace from Phase 8 (see [`docs/langfuse_categorize_trace_detail.png`](docs/langfuse_categorize_trace_detail.png)) |
 
 ### A/B testing prompt or model changes
 
@@ -202,90 +207,108 @@ embedding:
 ```bash
 # Deploy a new revision with --no-traffic, then compare:
 python scripts/eval_categorization.py \
-    --base-url https://invoice-processor-PREVIEW.run.app \
+    --url http://localhost:8000 \
     --baseline https://invoice-processor-510066601703.europe-central2.run.app
 ```
 
-Output highlights **fixed** (was wrong, now right) and **regressed** (was right,
-now wrong) invoices per fixture, so a "+2% accuracy" headline doesn't hide
-catastrophic regressions on individual categories — averages are easy to game,
-flips aren't.
+Output lists per-fixture flips: `FIXED` (`baseline wrong → candidate correct`)
+and `REGRESSED` (`baseline correct → candidate wrong`). A "85% → 87%" average
+can hide three regressions traded for five fixes — flips make that visible.
+Averages are easy to game, flips aren't.
 
-### Fixture set design
+### Fixture set design — scope and trade-offs
 
-15 labeled synthetic KSeF FA(3) invoices under
-[`tests/fixtures/labeled/`](tests/fixtures/labeled/), covering 10 categories:
+**11 labeled synthetic KSeF FA(3) invoices across 6 categories**, generated
+from a single manifest at
+[`tests/fixtures/labeled/manifest.json`](tests/fixtures/labeled/manifest.json):
 
-- Usługi IT i oprogramowanie · Konsulting i doradztwo · Materiały biurowe
-- Marketing i reklama · Usługi telekomunikacyjne · Media i opłaty
-- Usługi prawne · Transport i logistyka · Sprzęt i wyposażenie · Szkolenia i rozwój
+| Category (enum literal) | Fixtures | What's tested |
+|---|---|---|
+| `Usługi IT i oprogramowanie` | 3 (incl. adversarial) | SaaS, hosting, ERP-with-implementation edge case |
+| `Konsulting i doradztwo` | 2 | Business audit vs tax advisory — generalization within category |
+| `Marketing i reklama` | 2 | Platform spend (Google Ads) vs agency retainer — platform-vs-service |
+| `Materiały biurowe` | 2 | Generic supplies (paper) vs domain-specific (toner — same as semantic-search example from README) |
+| `Transport i logistyka` | 1 | Single-category coverage signal |
+| `Sprzęt i wyposażenie` | 1 | Discrimination from IT (laptop ≠ software) |
 
-Categories with 2 fixtures each (IT, consulting, office supplies, marketing)
-test whether the model generalises within the category — e.g. "Google Ads
-spend" and "Marketing agency retainer" are both marketing but look very
-different to a sentence embedder.
+**Coverage gap (explicit):** 6 of the 12 categories in `InvoiceCategory` are
+covered. The remaining 6 (`Telekomunikacja`, `Media`, `Usługi prawne`,
+`Szkolenia i edukacja`, `Najem`, `Catering`, `Inne`) are intentionally out of
+scope for this demo eval — adding meaningful signal across all 12 would
+require ~30+ fixtures for statistical reliability on rare categories, which is
+past the demo's $-budget (~$0.005 / run vs ~$0.0017 now).
 
-One fixture is **deliberately adversarial**
-(`ambiguous_consulting_software_01.xml` — "ERP Consulting & Software" seller
-with both ERP licence and implementation hours as line items). Ground truth is
-"Usługi IT" because 80% of the invoice value is software. This tests whether
-RAG neighbours and line-item value dominate over surface keywords in the
-seller name — a failure here means the model is taking shortcuts, even when
-overall accuracy looks good.
+Selection optimised for **highest-volume B2B expense categories** that exercise
+the most interesting discriminations (IT vs consulting, office vs equipment,
+platform-vs-service marketing). Adding rare categories would inflate the
+fixture count without adding diagnostic value at this scope.
 
-Ground truth and rationale are documented inline in
-[`tests/fixtures/labeled_invoices.json`](tests/fixtures/labeled_invoices.json).
+### The adversarial fixture (diagnostic centerpiece)
 
-The fixture set is intentionally small — 15 invoices is enough to detect
-prompt regressions but small enough that a full eval run costs <$0.003 and
-takes ~60 seconds. Grow the fixture pool when categorization moves past demo
-scope.
+One fixture — `adversarial_erp_consulting_software_11.xml` — is deliberately
+designed to break naive classifiers:
+
+- **Seller name:** "ERP Consulting Solutions Sp. z o.o." (contains the word "Consulting")
+- **Line item 1:** ERP licence — 12 000 PLN (80% of invoice value)
+- **Line item 2:** Implementation consulting hours — 3 000 PLN (20% of invoice value)
+- **Ground truth:** `Usługi IT i oprogramowanie` — because the dominant economic activity is the software purchase, not the consulting service
+
+A model that takes the seller name as a strong signal will classify this as
+`Konsulting i doradztwo` and be wrong. A model that uses RAG neighbours and
+line-item value weights will get it right. **Top-1 accuracy alone can look
+healthy while failing this exact case** — it's the most informative single
+fixture in the set for understanding *how* the categorization works, not just
+whether it works on average.
 
 ### Generating / regenerating fixtures
 
-The XML fixtures are generated from the JSON manifest by a small script:
-
 ```bash
+# Validate manifest only (no XML write) — sanity check before generation
+python scripts/generate_eval_fixtures.py --check
+
+# Generate 11 XML fixtures from the manifest
 python scripts/generate_eval_fixtures.py
 ```
 
-Each fixture gets a category-appropriate seller name, line items, and realistic
-amounts (from 492 PLN telecom to 18 450 PLN ERP). Idempotent — re-run after
-editing the manifest to refresh the XML pool. All NIPs pass checksum but match
-no real entity.
+The manifest is the **single source of truth** for the eval set — no separate
+XML templates to drift out of sync. The generator validates each entry's
+`expected` category against the live `InvoiceCategory` enum at startup, checks
+that NIPs are 10 digits and `line.net` parses as Decimal, and fails loud on
+the first malformed entry with the full list of all errors (not just the first
+one).
+
+Idempotent — re-run after editing the manifest to refresh the XML pool. All
+NIPs are synthetic and match no real entity.
 
 ### CI gate (optional, not enabled by default)
 
-The script exits non-zero if accuracy falls below `$EVAL_ACCURACY_FLOOR`
-(default `0.60`). To gate deploys on eval accuracy:
+The script exits non-zero if accuracy falls below `--min-accuracy` (default
+`0.0`, no floor). To gate deploys on eval accuracy:
 
 ```yaml
 - name: Eval categorization accuracy
   env:
     BASE_URL: ${{ steps.deploy.outputs.preview_url }}
-    EVAL_ACCURACY_FLOOR: "0.80"
-  run: python scripts/eval_categorization.py
+  run: |
+    python scripts/eval_categorization.py \
+      --url "$BASE_URL" \
+      --min-accuracy 0.80
 ```
 
 Not enabled in CI by default — each eval run consumes real OpenAI tokens and
 shouldn't fire on every PR. Trigger manually or only on `main` deploys, and
-only if you've sized the fixture set up to something that warrants protection
-(15 fixtures is a smoke-eval, not a regression gate).
+only if the fixture set has been sized up to something that warrants
+regression protection (11 fixtures is a smoke-eval, not a regression gate).
 
 ### What this doesn't measure (and why)
 
 To be explicit about scope:
 
-- **Extraction accuracy for PDF path** — the OCR + LLM extraction code exists
-  and is unit-tested, but the worker isn't deployed in prod. Eval would be
-  meaningful here and is the natural next step if the PDF endpoint goes live
-- **Semantic search relevance** — needs a larger fixture set with labeled
-  query→relevance pairs. Not blocked technically, just outside demo scope
-- **End-to-end pipeline accuracy** (n8n → KSeF parse → categorize) — covered
-  by the smoke test (`scripts/smoke_test_prod.sh`) for happy-path behaviour,
-  but not for "did each step return the *right* result." Would compose
-  naturally on top of per-component evals once they exist
-
+- **Extraction accuracy for the PDF path** — the OCR + LLM extraction code exists and is unit-tested, but the worker isn't deployed in prod. Eval would be meaningful here and is the natural next step if the PDF endpoint goes live
+- **Semantic search relevance** — needs a larger fixture set with labeled query→relevance pairs. Not technically blocked, just outside demo scope
+- **End-to-end pipeline accuracy** (n8n → KSeF parse → categorize) — the smoke test (`scripts/smoke_test_prod.sh`) covers happy-path behaviour, not "did each step return the *right* result." Would compose naturally on top of per-component evals once they exist
+- **Rare-category accuracy** (telecom, utilities, legal, training, rent, catering, other) — out of scope for this fixture set, see "Coverage gap" above
+- **Statistical confidence intervals** — 11 fixtures is too small for bootstrap CI. Accuracy of "9/11 = 82%" should be read as "directionally good", not "82.0% ± 1%" precision. Sample expansion is the natural fix when categorization moves past demo scope
 
 ---
 
