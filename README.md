@@ -153,7 +153,7 @@ expense-policy reporting). It's also the only path where prompt or model
 changes can silently regress without unit tests catching it. That's where eval
 earns its keep.
 
-### Latest run ([`eval_report'](docs/eval/baseline_2026-05-11.json))
+### Latest run ([`eval_report`](docs/eval/baseline_2026-05-11.json))
 
 | Metric | Value | Notes |
 |---|---|---|
