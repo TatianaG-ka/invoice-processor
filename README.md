@@ -161,7 +161,7 @@ earns its keep.
 | Per-category accuracy | see breakdown below | 6 categories — IT / CONSULTING / MARKETING / OFFICE / TRANSPORT / EQUIPMENT. Only IT scores below 100% (2/3) — the one miss is the adversarial fixture, by design |
 | Latency | min = 1633 ms, **median = 2497 ms**, max = 7023 ms | End-to-end including KSeF parse + Qdrant top-3 lookup + LLM round trip. min/median/max instead of p50/p95 — N=11 is too small for reliable percentile estimation. Max is the first-fixture spike (Qdrant collection first-touch + first OpenAI handshake); subsequent fixtures stay near the median |
 | **Confidence calibration gap** | **+0.10** (mean correct 0.90 − mean wrong 0.80) | Sits exactly on the `≥ 0.10` "usable signal" threshold → at this calibration, confidence alone isn't enough to gate `auto-approve vs human-review` routing; needs prompt iteration or N>11 to firm up |
-| Cost per run | $0.001716 (11 × $0.000156) | Reconciled to per-call cost observed in Langfuse — see [`docs/langfuse_categorize_trace_detail.png`](docs/langfuse_categorize_trace_detail.png) (model `gpt-4o-mini`, 821 prompt → 55 completion tokens) |
+| Cost per run | $0.001716 estimated / **$0.001878 actual in Langfuse** | Reconciled against Langfuse per-token billing — see [cost dashboard](docs/eval/langfuse_eval_cumulative_2.png) (11 traces, 22 observations, all `gpt-4o-mini`) + [individual traces list](docs/eval/langfuse_eval_cumulative_1.png) + [per-call detail](docs/langfuse_categorize_trace_detail.png). The 9 % delta between estimated (11 × $0.000156 baseline) and actual is prompt-length variance per fixture |
 
 **Per-category accuracy** - see breakdown here:
 
