@@ -413,7 +413,7 @@ git clone https://github.com/TatianaG-ka/invoice-processor.git
 cd invoice-processor
 cp .env.example .env          # fill in OPENAI_API_KEY; leave LANGFUSE_* blank for offline dev
 
-docker-compose -f docker-compose.v2.yml up --build
+docker-compose up --build
 # API:       http://localhost:8000
 # Swagger:   http://localhost:8000/docs
 # Postgres:  localhost:5432

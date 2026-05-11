@@ -1,8 +1,7 @@
 # ============================================
-# Invoice Processor — docker-compose (minimal)
+# Invoice Processor — docker-compose
 # ============================================
-# API + Postgres only. See docker-compose.v2.yml for the full stack
-# (api + worker + postgres + redis + qdrant).
+# Full local stack: api, worker, postgres, redis, qdrant.
 #
 # Start:  docker-compose up --build
 # Stop:   docker-compose down
@@ -16,18 +15,54 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://invoice_user:invoice_pass@postgres:5432/invoices
+      # asyncpg driver — the app uses SQLAlchemy async engine.
+      - DATABASE_URL=postgresql+asyncpg://invoice_user:invoice_pass@postgres:5432/invoices
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=invoices
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      # Hot reload — code changes without container restart
       - ./app:/code/app
     restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: invoice-worker
+    environment:
+      # Same asyncpg driver as the API — the task wraps its own async
+      # session around the shared async engine.
+      - DATABASE_URL=postgresql+asyncpg://invoice_user:invoice_pass@postgres:5432/invoices
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=invoices
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OCR_LANGUAGES=${OCR_LANGUAGES:-pol+eng}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    command: rq worker --url redis://redis:6379 default
+    volumes:
+      - ./app:/code/app
+    restart: unless-stopped
+    # Scale workers horizontally:
+    # docker-compose up --scale worker=3
 
   postgres:
     image: postgres:16-alpine
@@ -47,5 +82,28 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: invoice-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: invoice-qdrant
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  qdrant_data:

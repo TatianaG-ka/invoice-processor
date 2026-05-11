@@ -26,28 +26,20 @@ dev:  ## Run the app locally (no Docker, with hot reload)
 
 # ===== Docker =====
 
-up:  ## Start all services (docker-compose up)
+up:  ## Start full stack (api + worker + postgres + redis + qdrant)
 	docker-compose up --build -d
-	@echo ""
-	@echo "  API:         http://localhost:8000"
-	@echo "  Swagger UI:  http://localhost:8000/docs"
-	@echo "  Postgres:    localhost:5432"
-	@echo ""
-	@echo "Logs: make logs"
-	@echo "Stop: make down"
-
-up-v2:  ## Start full stack (api + worker + postgres + redis + qdrant)
-	docker-compose -f docker-compose.v2.yml up --build -d
 	@echo ""
 	@echo "  API:          http://localhost:8000"
 	@echo "  Swagger UI:   http://localhost:8000/docs"
 	@echo "  Qdrant UI:    http://localhost:6333/dashboard"
 	@echo "  Postgres:     localhost:5432"
 	@echo "  Redis:        localhost:6379"
+	@echo ""
+	@echo "Logs: make logs"
+	@echo "Stop: make down"
 
 down:  ## Stop all services
 	docker-compose down
-	-docker-compose -f docker-compose.v2.yml down
 
 restart:  ## Restart services
 	make down
@@ -96,4 +88,3 @@ clean:  ## Remove caches and temporary files
 
 clean-docker:  ## Remove containers, volumes and images (CAUTION — wipes Postgres data!)
 	docker-compose down -v
-	docker-compose -f docker-compose.v2.yml down -v
