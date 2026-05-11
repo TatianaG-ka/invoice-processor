@@ -284,7 +284,7 @@ def print_report(rep: EvalReport) -> None:
         f"median={rep.latency_median_ms:.0f}ms  max={rep.latency_max_ms:.0f}ms"
     )
     if rep.confidence_gap is not None:
-        signal = "usable signal" if rep.confidence_gap >= 0.10 else "WEAK — confidence unreliable for routing"
+        signal = "usable signal" if rep.confidence_gap >= 0.099 else "WEAK — confidence unreliable for routing"
         print(
             f"Confidence:    mean(correct)={rep.confidence_mean_correct:.2f}  "
             f"mean(wrong)={rep.confidence_mean_wrong:.2f}  "

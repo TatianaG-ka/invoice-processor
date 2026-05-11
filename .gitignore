@@ -125,6 +125,8 @@ tmp/
 !docs/idempotency_*.png
 # Live Swagger UI screenshot — referenced from README live-demo section
 !docs/swagger_*.png
+# Categorization eval baseline report — referenced from README evaluation section
+!docs/eval/*.png
 
 # ============================================
 # Manual smoke tests (consume real API credits, per-dev tooling)
