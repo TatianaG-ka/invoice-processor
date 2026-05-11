@@ -12,6 +12,10 @@ Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal
 
 ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
 
+
+[![Demo](https://img.shields.io/badge/▶_Watch_Demo-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=oLyzAMTcJ3M)
+
+
 ---
 
 ## Why I built this  
@@ -293,6 +297,12 @@ The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbo
 | --- | --- |
 | [`n8n/01_ksef_ingestion.json`](n8n/01_ksef_ingestion.json) | Schedule (every 30 min) → generate 5 synthetic FA(3) invoices in a Code node → SplitInBatches → `POST /invoices/ksef` → branch on status code → Slack `#invoice-pipeline-demo` + Google Sheets `processed_invoices` audit row |
 | [`n8n/99_error_handler.json`](n8n/99_error_handler.json) | Bound as `errorWorkflow` on the main flow. Error Trigger → extract context → fan-out to Sheets `errors` tab + Slack alert with execution id |
+
+**n8n/01_ksef_ingestion**
+<img width="1727" height="497" alt="ksef" src="https://github.com/user-attachments/assets/12aa3492-3ecf-423e-ab6f-30b6c33c82a5" />
+
+**`n8n/99_error_handler**
+<img width="860" height="473" alt="error handler" src="https://github.com/user-attachments/assets/d4312166-ce57-4252-9137-e1c0d95a56c0" />
 
 The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201`.
 
