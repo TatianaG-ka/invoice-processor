@@ -161,13 +161,14 @@ earns its keep.
 | Per-category accuracy | see breakdown below | 6 categories — IT / CONSULTING / MARKETING / OFFICE / TRANSPORT / EQUIPMENT. Only IT scores below 100% (2/3) — the one miss is the adversarial fixture, by design |
 | Latency | min = 1633 ms, **median = 2497 ms**, max = 7023 ms | End-to-end including KSeF parse + Qdrant top-3 lookup + LLM round trip. min/median/max instead of p50/p95 — N=11 is too small for reliable percentile estimation. Max is the first-fixture spike (Qdrant collection first-touch + first OpenAI handshake); subsequent fixtures stay near the median |
 | **Confidence calibration gap** | **+0.10** (mean correct 0.90 − mean wrong 0.80) | Sits exactly on the `≥ 0.10` "usable signal" threshold → at this calibration, confidence alone isn't enough to gate `auto-approve vs human-review` routing; needs prompt iteration or N>11 to firm up |
-| Cost per run | $0.001716 estimated / **$0.001878 actual in Langfuse** | Reconciled against Langfuse per-token billing — see [cost dashboard](docs/eval/langfuse_eval_cumulative_2.png) (11 traces, 22 observations, all `gpt-4o-mini`) + [individual traces list](docs/eval/langfuse_eval_cumulative_1.png) + [per-call detail](docs/langfuse_categorize_trace_detail.png). The 9 % delta between estimated (11 × $0.000156 baseline) and actual is prompt-length variance per fixture |
+| Cost per run | $0.001716 estimated / **$0.001878 actual in Langfuse** | Reconciled against Langfuse per-token billing — see [cost dashboard](docs/eval/langfuse_eval_cumulative_2.png) (11 traces, 22 observations, all `gpt-4o-mini`) + [individual traces list](docs/eval/langfuse_eval_cumulative_1.png) + [per-call detail](docs/eval/langfuse_eval_adversarial_trace.png.png). The 9 % delta between estimated (11 × $0.000156 baseline) and actual is prompt-length variance per fixture |
 
 **Per-category accuracy** - see breakdown here:
 
 <img width="942" height="530" alt="eval_report" src="https://github.com/user-attachments/assets/c6a34218-9a5a-4634-aa8b-0d0b5e917ac0" />
 
-**Reconciled against Langfuse** — same eval run, captured in the cost dashboard: 11 traces, 22 observations (SPAN parent + GENERATION child per call), all `gpt-4o-mini`, $0.001878 cumulative. The 9 % delta against the $0.001716 baseline estimate is prompt-length variance per fixture (different KSeF XML → different token counts):
+  
+**Same eval run captured in Langfuse cost dashboard:**
 
 ![Langfuse cost dashboard for the eval run](docs/eval/langfuse_eval_cumulative_2.png)
 
@@ -472,7 +473,7 @@ scripts/
 
 docs/
   dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
-  langfuse_*.png            # observability screenshots (Hobby tier has 30-day retention)
+  langfuse_*.png            # observability screenshots (snapshot evidence, retention-independent)
 
 tests/                      # 155 tests, hermetic, ~5 s
 ```
@@ -481,7 +482,7 @@ tests/                      # 155 tests, hermetic, ~5 s
 
 ## Author
 
-**Tatiana Golińska**
+**Tatiana Golińska** — Workflow Automation Engineer (n8n, Python, AI integration)
 [LinkedIn](https://www.linkedin.com/in/tatiana-golinska/)
 
 Built as a flagship portfolio project demonstrating production AI engineering patterns: live deploy, observability with cost tracking, RAG with idempotency, ADRs as first-class documentation, and hermetic testing.
