@@ -67,8 +67,8 @@ test-cov:  ## Tests with coverage report
 lint:  ## Lint (ruff)
 	ruff check app tests scripts
 
-format:  ## Format (black + ruff --fix)
-	black app tests scripts
+format:  ## Format (ruff format + ruff --fix)
+	ruff format app tests scripts
 	ruff check --fix app tests scripts
 
 typecheck:  ## Type checking (mypy)

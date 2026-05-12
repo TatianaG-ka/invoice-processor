@@ -34,7 +34,7 @@ jobs:
         run: ruff check app tests scripts
 
       - name: Ruff format check
-        run: ruff format --check app tests
+        run: ruff format --check app tests scripts
 
   # ============================================
   # Job 2: Tests
