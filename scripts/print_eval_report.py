@@ -20,7 +20,7 @@ COST_PER_CALL_USD = 0.000156
 
 def render(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    d = payload["candidate"] if "candidate" in payload else payload
+    d = payload.get("candidate", payload)
 
     print()
     print("=== Categorization Eval Results ===")
@@ -41,7 +41,9 @@ def render(path: Path) -> None:
             f"gap={gap:+.2f}  ← {signal}"
         )
     elif d.get("confidence_mean_correct") is not None:
-        print(f"Confidence:    mean(correct)={d['confidence_mean_correct']:.2f}  (no wrong predictions to compare)")
+        print(
+            f"Confidence:    mean(correct)={d['confidence_mean_correct']:.2f}  (no wrong predictions to compare)"
+        )
     print(
         f"Cost:          ${d['estimated_cost_usd']:.6f}  "
         f"({d['n_total'] - d['n_errors']} × ${COST_PER_CALL_USD})"

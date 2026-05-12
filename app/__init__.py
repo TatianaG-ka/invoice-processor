@@ -1,3 +1,1 @@
-"""Invoice Processor - aplikacja FastAPI."""
-
-__version__ = "0.1.0"
+"""Invoice Processor — FastAPI service for KSeF-compatible invoice intelligence."""

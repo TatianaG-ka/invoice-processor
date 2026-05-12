@@ -13,6 +13,11 @@
 # stage is free of gcc/build-essential/libpq-dev, which keeps the final
 # image substantially smaller and cuts attack surface.
 #
+# Dependency source: pyproject.toml ([project.dependencies]) — single
+# source of truth for runtime pins. Layer-caching trick below installs
+# deps against an empty `app/` so the deps layer is invalidated only
+# when pyproject.toml changes, not when source under app/ changes.
+#
 # Build:   docker build -t invoice-processor .
 # Run:     docker run -p 8000:8000 invoice-processor
 # Shell:   docker run -it --rm invoice-processor bash
@@ -39,9 +44,26 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
-COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+
+# --- Layer 1: deps only (cached unless pyproject.toml changes) -------
+# README.md is required because pyproject.toml references it via
+# `readme = "README.md"`. Without it, pip install errors out.
+# Empty app/__init__.py is the trick: setuptools sees a package to
+# install, deps resolve against pyproject, but no source is yet baked
+# in. The deps layer caches independently of app/ changes — saves
+# ~750 MB of torch redownload on every code edit.
+COPY pyproject.toml README.md ./
+RUN mkdir app && touch app/__init__.py \
+    && pip install --upgrade pip \
+    && pip install --no-cache-dir . \
+    && rm -rf app
+
+# --- Layer 2: real source (cached unless app/ changes) ---------------
+# Re-install with --no-deps so deps already in the venv stay untouched
+# and only the package metadata is refreshed to point at the real
+# source tree.
+COPY ./app ./app
+RUN pip install --no-deps --no-cache-dir .
 
 # ---------------------------------------------------------------------
 # Stage 2 — runtime

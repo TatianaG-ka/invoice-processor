@@ -15,9 +15,8 @@ help:  ## Show available commands
 
 # ===== Setup =====
 
-install:  ## Install all dependencies (prod + dev)
-	pip install -r requirements.txt
-	pip install -r requirements-dev.txt
+install:  ## Install all dependencies (prod + dev) via pyproject.toml
+	pip install -e ".[dev]"
 
 # ===== Local development =====
 
@@ -66,11 +65,11 @@ test-cov:  ## Tests with coverage report
 # ===== Code quality =====
 
 lint:  ## Lint (ruff)
-	ruff check app tests
+	ruff check app tests scripts
 
-format:  ## Format (black + ruff --fix)
-	black app tests
-	ruff check --fix app tests
+format:  ## Format (ruff format + ruff --fix)
+	ruff format app tests scripts
+	ruff check --fix app tests scripts
 
 typecheck:  ## Type checking (mypy)
 	mypy app

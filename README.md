@@ -431,6 +431,9 @@ The worker and API share one image; docker-compose overrides the default `uvicor
 ## Tests
 
 ```bash
+# One-time setup (no Docker, requires Python 3.11 — torch wheels not available for 3.13 yet)
+pip install -e ".[dev]"
+
 pytest                         # full suite, ~5 seconds
 pytest --cov=app --cov-report=term-missing
 ```

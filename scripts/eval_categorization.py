@@ -284,15 +284,23 @@ def print_report(rep: EvalReport) -> None:
         f"median={rep.latency_median_ms:.0f}ms  max={rep.latency_max_ms:.0f}ms"
     )
     if rep.confidence_gap is not None:
-        signal = "usable signal" if rep.confidence_gap >= 0.099 else "WEAK — confidence unreliable for routing"
+        signal = (
+            "usable signal"
+            if rep.confidence_gap >= 0.099
+            else "WEAK — confidence unreliable for routing"
+        )
         print(
             f"Confidence:    mean(correct)={rep.confidence_mean_correct:.2f}  "
             f"mean(wrong)={rep.confidence_mean_wrong:.2f}  "
             f"gap={rep.confidence_gap:+.2f}  ← {signal}"
         )
     elif rep.confidence_mean_correct is not None:
-        print(f"Confidence:    mean(correct)={rep.confidence_mean_correct:.2f}  (no wrong predictions to compare)")
-    print(f"Cost:          ${rep.estimated_cost_usd:.6f}  ({rep.n_total - rep.n_errors} × ${COST_PER_CALL_USD})")
+        print(
+            f"Confidence:    mean(correct)={rep.confidence_mean_correct:.2f}  (no wrong predictions to compare)"
+        )
+    print(
+        f"Cost:          ${rep.estimated_cost_usd:.6f}  ({rep.n_total - rep.n_errors} × ${COST_PER_CALL_USD})"
+    )
     print()
     print("Per-category accuracy:")
     for cat, stats in sorted(rep.per_category.items()):
@@ -311,8 +319,12 @@ def diff_runs(baseline: EvalReport, candidate: EvalReport) -> None:
     """Print per-fixture flips between two runs."""
     print()
     print("=== A/B Diff (baseline vs candidate) ===")
-    print(f"  Baseline:  {baseline.n_correct}/{baseline.n_total} ({baseline.accuracy:.1%})  @ {baseline.url}")
-    print(f"  Candidate: {candidate.n_correct}/{candidate.n_total} ({candidate.accuracy:.1%})  @ {candidate.url}")
+    print(
+        f"  Baseline:  {baseline.n_correct}/{baseline.n_total} ({baseline.accuracy:.1%})  @ {baseline.url}"
+    )
+    print(
+        f"  Candidate: {candidate.n_correct}/{candidate.n_total} ({candidate.accuracy:.1%})  @ {candidate.url}"
+    )
 
     baseline_by_id = {r["fixture_id"]: r for r in baseline.results}
     candidate_by_id = {r["fixture_id"]: r for r in candidate.results}
@@ -342,7 +354,9 @@ def diff_runs(baseline: EvalReport, candidate: EvalReport) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--url", default=DEFAULT_URL, help=f"Candidate API URL (default {DEFAULT_URL})")
+    parser.add_argument(
+        "--url", default=DEFAULT_URL, help=f"Candidate API URL (default {DEFAULT_URL})"
+    )
     parser.add_argument(
         "--baseline",
         help="Baseline API URL — enables A/B mode (runs eval twice, prints per-fixture flips).",
