@@ -127,6 +127,8 @@ tmp/
 !docs/swagger_*.png
 # Categorization eval baseline report — referenced from README evaluation section
 !docs/eval/*.png
+# Inline diagrams (architecture + eval + n8n workflows) — referenced from README
+!docs/inne/*.png
 
 # ============================================
 # Manual smoke tests (consume real API credits, per-dev tooling)

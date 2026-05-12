@@ -45,7 +45,7 @@ downstream:
 
 ## Architecture
 
-<img width="960" height="924" alt="invoice_processing_architecture" src="https://github.com/user-attachments/assets/e7be2ffa-bbf2-4c99-87c6-c682b730e7db" />
+![Invoice processing architecture](docs/inne/invoice_processing_architecture.png)
 
 
 **The diagram shows the full flow:** the client/n8n sends requests to FastAPI, which either queues work through Redis + RQ (where the worker performs OCR and extraction with OpenAI) or parses KSeF XML directly. The result, ExtractedInvoice, is written in parallel to PostgreSQL and Qdrant; categorization uses RAG, with Qdrant neighbours passed as few-shot examples to OpenAI, and the result is stored back in PostgreSQL. Everything runs inside Cloud Run, while Langfuse collects traces from FastAPI. The dotted lines represent helper actions such as triggering categorization and reindexing on startup.
@@ -77,12 +77,11 @@ downstream:
 | Route | Shape | Notes |
 |---|---|---|
 | `GET  /health` | `{status: "healthy"}` | Liveness probe |
-| `POST /invoices` | 202 + `{job_id, status_url}` | PDF upload, enqueues to worker |
-| `GET  /invoices/jobs/{id}` | `{status, invoice_id, error}` | Poll job status |
-| `POST /invoices/ksef` | 201 + `StoredInvoice` | KSeF XML, synchronous (fast parse) |
-| `GET  /invoices/{id}` | 200 + `StoredInvoice` | Retrieve by DB primary key |
-| `GET  /invoices/search?q=...&limit=10` | 200 + `SearchResponse` | Semantic search, DB-hydrated results |
-| `POST /invoices/{id}/categorize?force=false` | 201 (fresh) or 200 (cached) + `CategorizationResult` | RAG over Qdrant + LLM categorization; idempotent by default |
+| `POST /invoices/ksef` | 201 + `StoredInvoice` | KSeF XML upload (FA(2)/FA(3)), synchronous parse; idempotent re-post returns `200` + same id |
+| `GET  /invoices` | 200 + `list[StoredInvoice]` | List recently stored invoices, newest first (`?limit=` default 50, max 100) |
+| `GET  /invoices/search` | 200 + `SearchResponse` | Semantic search by `?q=` query, DB-hydrated results (`?limit=` default 10, max 100) |
+| `POST /invoices/{invoice_id}/categorize` | 201 (fresh) or 200 (cached) + `CategorizationResult` | RAG over Qdrant + LLM categorization; idempotent by default, `?force=true` bypasses cache |
+| `GET  /invoices/{invoice_id}` | 200 + `StoredInvoice` | Retrieve by DB primary key |
 
 Every DB-touching endpoint narrows `sqlalchemy.exc.SQLAlchemyError` into a clean `503 Database temporarily unavailable.` — no stack trace ever reaches the wire.
 
@@ -129,7 +128,7 @@ The `score` field is raw cosine similarity from MiniLM — the same sentence-tra
 
 End-to-end verification (health → KSeF → retrieval → search → idempotency) is automated in [`scripts/smoke_test_prod.sh`](scripts/smoke_test_prod.sh) — see [`docs/idempotency_smoke_test.png`](docs/idempotency_smoke_test.png) for the live `201 → 200, same id` flip from a recent revision.
 
-The full live API surface is browsable at [`/docs`](https://invoice-processor-510066601703.europe-central2.run.app/docs) (FastAPI's auto-generated Swagger UI from the same Pydantic schemas the code uses):
+The full live API surface is browsable in [Swagger UI](https://invoice-processor-510066601703.europe-central2.run.app/docs) — FastAPI auto-generates it from the same Pydantic schemas the code uses:
 
 ![Swagger UI on Cloud Run](docs/swagger_fastapi.png)
 
@@ -165,7 +164,7 @@ earns its keep.
 
 **Per-category accuracy** - see breakdown here:
 
-<img width="942" height="530" alt="eval_report" src="https://github.com/user-attachments/assets/c6a34218-9a5a-4634-aa8b-0d0b5e917ac0" />
+![Eval report — per-category accuracy breakdown](docs/inne/eval_report.png)
 
   
 **Same eval run captured in Langfuse cost dashboard:**
@@ -325,10 +324,10 @@ The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbo
 | [`n8n/99_error_handler.json`](n8n/99_error_handler.json) | Bound as `errorWorkflow` on the main flow. Error Trigger → extract context → fan-out to Sheets `errors` tab + Slack alert with execution id |
 
 **n8n/01_ksef_ingestion**
-<img width="1727" height="497" alt="ksef" src="https://github.com/user-attachments/assets/12aa3492-3ecf-423e-ab6f-30b6c33c82a5" />
+![n8n KSeF ingestion workflow](docs/inne/WF_01.png)
 
 **`n8n/99_error_handler**
-<img width="860" height="473" alt="error handler" src="https://github.com/user-attachments/assets/d4312166-ce57-4252-9137-e1c0d95a56c0" />
+![n8n error handler workflow](docs/inne/WF_02.png)
 
 The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201`.
 
