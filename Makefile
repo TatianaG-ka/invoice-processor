@@ -68,8 +68,8 @@ lint:  ## Lint (ruff)
 	ruff check app tests scripts
 
 format:  ## Format (black + ruff --fix)
-	black app tests
-	ruff check --fix app tests
+	black app tests scripts
+	ruff check --fix app tests scripts
 
 typecheck:  ## Type checking (mypy)
 	mypy app

@@ -127,7 +127,7 @@ dev = [
 [project.urls]
 Repository = "https://github.com/TatianaG-ka/invoice-processor"
 Issues     = "https://github.com/TatianaG-ka/invoice-processor/issues"
-Live-Demo  = "https://invoice-processor-510066601703.europe-central2.run.app/docs"
+# Live demo URL lives in README only (avoids leaking GCP project number in package metadata).
 
 # ----------------------------------------------------------------------------
 #  Package discovery — tell setuptools where the source actually lives.
