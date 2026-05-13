@@ -2,11 +2,11 @@
 
 > **KSeF-compatible invoice intelligence microservice.** Ingest a Polish invoice (PDF or KSeF XML), extract structured fields with an LLM, persist to Postgres, make the archive semantically searchable, and categorize via RAG over historical neighbours — all wrapped in production AI observability with per-call cost tracking.
 
-## 🚀 Try it live (interactive Swagger UI, ~30 seconds)
+## 🚀 Try it live (interactive Swagger UI, ≈30 seconds)
 
 **[https://invoice-processor-510066601703.europe-central2.run.app/docs](https://invoice-processor-510066601703.europe-central2.run.app/docs)**
 
-> ⚠️ **First request may take ~10s** — Cloud Run cold start with `min-instances=0` (free-tier hosting). Retry once and it wakes up; subsequent calls respond in milliseconds.
+> ⚠️ **First request may take ≈10s** — Cloud Run cold start with `min-instances=0` (free-tier hosting). Retry once and it wakes up; subsequent calls respond in milliseconds.
 
 ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
 
@@ -16,7 +16,7 @@ Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal
 
 ## Why I built this  
 
-**KSeF XML becomes legally mandatory for all Polish B2B businesses in April 2026** (large taxpayers above PLN 200M revenue went live in February 2026). This translates to ~1M+ companies × ~1000 invoices/year = a structural compliance gap where **n8n + AI + observability** can replace manual copy-paste from PDF to Excel.
+**KSeF XML becomes legally mandatory for all Polish B2B businesses in April 2026** (large taxpayers above PLN 200M revenue went live in February 2026). This translates to ≈1M+ companies × ≈1000 invoices/year = a structural compliance gap where **n8n + AI + observability** can replace manual copy-paste from PDF to Excel.
 
 This project is intentionally scoped as a **flagship portfolio piece** demonstrating four capabilities that rarely co-exist in a single repo:
 
@@ -62,11 +62,11 @@ downstream:
 | Background queue | Redis + RQ 2.0 | `POST /invoices` (PDF) enqueues, worker does extract + persist + index — **local dev only** (worker not deployed on Cloud Run, [see why](#known-limitations)) |
 | PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically by the same PDF worker (local dev only) |
 | KSeF XML | lxml with dual-schema support | FA(2) legacy + FA(3) `http://crd.gov.pl/wzor/2025/06/25/13775/` |
-| LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.000274/call |
-| LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ~$0.000156/call |
-| Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
+| LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ≈$0.000274/call |
+| LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ≈$0.000156/call |
+| Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ≈80 MB |
 | Observability | Langfuse Cloud | `@observe` on OpenAI calls (extraction + categorization), token/cost tracking |
-| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 169 tests, ~5 s full run |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 169 tests, ≈5 s full run |
 | CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
 | Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
@@ -85,7 +85,7 @@ downstream:
 
 Every DB-touching endpoint narrows `sqlalchemy.exc.SQLAlchemyError` into a clean `503 Database temporarily unavailable.` — no stack trace ever reaches the wire.
 
-> ℹ️ **PDF ingestion is hidden from this public demo.** `POST /invoices` (PDF upload) + the OCR worker (`pdfplumber` + `pytesseract`) require an always-on RQ worker container. Cloud Run runs API-only to keep hosting at **$0 / month** — deploying the worker would double infra cost (~$8/mc) for one extra ingestion path that doesn't change the demo narrative. The PDF path is **fully wired and tested**, runs end-to-end via `docker-compose up`. KSeF + categorize + search + retrieve cover the deployed surface. Full rationale + deploy escape hatch in [Known limitations](#known-limitations).
+> ℹ️ **PDF ingestion is hidden from this public demo.** `POST /invoices` (PDF upload) + the OCR worker (`pdfplumber` + `pytesseract`) require an always-on RQ worker container. Cloud Run runs API-only to keep hosting at **$0 / month** — deploying the worker would double infra cost (≈$8/mc) for one extra ingestion path that doesn't change the demo narrative. The PDF path is **fully wired and tested**, runs end-to-end via `docker-compose up`. KSeF + categorize + search + retrieve cover the deployed surface. Full rationale + deploy escape hatch in [Known limitations](#known-limitations).
 
 ---
 
@@ -114,7 +114,7 @@ curl -X POST -F "file=@docs/dane_testowe/ksef/faktura_fa2_sample.xml;type=applic
 # {"id":1,...}
 # HTTP 200
 
-# RAG-driven LLM categorization (first call: 201 + LLM hit, ~3 s)
+# RAG-driven LLM categorization (first call: 201 + LLM hit, ≈3 s)
 curl -X POST "$URL/invoices/1/categorize"
 # {"invoice_id":1,"category":"Konsulting i doradztwo","confidence":0.8,
 #  "reasoning":"Faktura dotyczy usług konsultingowych...","cached":false}
@@ -257,8 +257,8 @@ from a single manifest at
 covered. The remaining 6 (`Telekomunikacja`, `Media`, `Najem`,
 `Szkolenia i edukacja`, `Catering`, `Inne`) are intentionally out of
 scope for this demo eval — adding meaningful signal across all 12 would
-require ~30+ fixtures for statistical reliability on rare categories, which is
-past the demo's $-budget (~$0.005 / run vs ~$0.0017 now).
+require ≈30+ fixtures for statistical reliability on rare categories, which is
+past the demo's $-budget (≈$0.005 / run vs ≈$0.0017 now).
 
 Selection optimised for **highest-volume B2B expense categories** that exercise
 the most interesting discriminations (IT vs consulting, office vs equipment,
@@ -331,11 +331,11 @@ The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbo
 **`n8n/error_handler**
 ![n8n error handler workflow](docs/images/WF_02.png)
 
-The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201`.
+The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx — distinguishing "expected business error" (4xx, log and continue) from "infrastructure error" (timeout, retry) is critical for batch pipelines, otherwise one bad invoice stops the whole batch. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201` and routes a successful POST to the error branch (a silent false-negative that took 2h to debug on first encounter).
 
 To import: open n8n → workflows → Import from File → pick a JSON, then re-bind your own Slack and Google Sheets OAuth credentials (placeholder ids in the file are stripped). Sheet headers must match the schema id fields exactly (`timestamp, invoice_id, invoice_number, vendor_nip, amount_gross_pln, status` for success, `timestamp, workflow, execution_id, failed_node, error_message, payload_excerpt` for errors).
 
-Note: n8n's `errorWorkflow` only triggers for production executions (active scheduled or webhook runs), not for manual "Execute Workflow" — to test the error path end-to-end, activate the main workflow and let it fire on its cron, or run the error workflow in isolation with a pinned Error Trigger sample payload.
+Note: n8n's `errorWorkflow` only triggers for production executions (active scheduled or webhook runs), not for manual "Execute Workflow" — to test the error path end-to-end, activate the main workflow and let it fire on its cron, or run the error workflow in isolation with a pinned Error Trigger sample payload. Without this awareness, manual "Execute" tests in the editor look like the `errorWorkflow` binding is broken when it's actually working as designed — a common 2-3h debug rabbit hole on n8n community forums.
 
 ---
 
@@ -345,7 +345,7 @@ Every OpenAI call (extraction *and* categorization) is wrapped with `@observe(as
 
 | | |
 |---|---|
-| ![Traces list](docs/eval/langfuse_eval_cumulative_1.png) |**Traces list from the eval run** — 22 observations (11 SPAN parents + 11 GENERATION children) across 11 categorization calls. Model `gpt-4o-mini`, per-call latency 1.43–3.33 s (median ~2.0 s), per-call cost $0.000152–$0.000189. Each row pairs a SPAN parent (the categorize endpoint span) with a GENERATION child (the underlying OpenAI call) — the SDK auto-nests them, so the dashboard reads as one trace per business operation rather than two unrelated entries. |
+| ![Traces list](docs/eval/langfuse_eval_cumulative_1.png) |**Traces list from the eval run** — 22 observations (11 SPAN parents + 11 GENERATION children) across 11 categorization calls. Model `gpt-4o-mini`, per-call latency 1.43–3.33 s (median ≈2.0 s), per-call cost $0.000152–$0.000189. Each row pairs a SPAN parent (the categorize endpoint span) with a GENERATION child (the underlying OpenAI call) — the SDK auto-nests them, so the dashboard reads as one trace per business operation rather than two unrelated entries. |
 | ![Trace detail](docs/langfuse_trace_detail.png) | **Extraction drilldown** — raw FAKTURA VAT input on top, the parsed `ExtractedInvoice` JSON on the bottom: `invoice_number`, `seller.nip`, `buyer.nip`, `line_items`, `totals.net/vat/gross/currency`. Latency 6.5 s, **$0.000274 / call** (extraction is more expensive than categorization because the prompt carries the full raw invoice text, not just a short structured snippet). |
 | ![Categorization trace — adversarial fixture](docs/eval/langfuse_eval_adversarial_trace.png) | **Categorization trace drilldown on the adversarial eval fixture** (the one miss in 10/11): full system prompt (12 categories + confidence rubric), RAG-augmented user prompt (target invoice + Qdrant top-2 neighbours as few-shot), structured assistant output (`category: "Konsulting i doradztwo"`, `confidence: 0.8`, Polish reasoning). 995 prompt → 66 completion tokens, latency 2.28 s, **$0.000189** for this call. The reasoning captures the exact bias the fixture was designed to surface — the model leaned on the *"konsulting"* token in both seller name and line item, even though the ERP licence dominates the invoice value (see [`adversarial_erp_consulting_software_11.xml`](tests/fixtures/labeled/adversarial_erp_consulting_software_11.xml)). For comparison, an earlier successful call sits at [`docs/langfuse_categorize_trace_detail.png`](docs/langfuse_categorize_trace_detail.png) (0.9 confidence, simpler invoice). |
 | ![Dashboard](docs/eval/langfuse_eval_cumulative_2.png) | **Cost dashboard for the eval run** — 11 traces, 22 observations, **$0.001878 cumulative cost** across all `gpt-4o-mini` calls. The total reconciles with the per-fixture costs in the Evaluation section ($0.001878 actual vs $0.001716 baseline estimate — the 9% delta is prompt-length variance per fixture: different KSeF XML payloads → different token counts). Single environment (`default`), single model — no spend leaks from misconfigured staging traces. |
@@ -405,8 +405,8 @@ These are deliberate trade-offs documented up-front. None block the demo; each h
 | Limitation | Impact | Why it's acceptable today | Path to fix |
 |---|---|---|---|
 | **Cold-start window on Cloud Run** (ADR-004 + 005) | First request after `--min-instances=0` idle can hit a 503 while Qdrant reindex from Postgres + MiniLM model load is in flight. Reproducible: a lone `?force=true` after 15 min idle returns 503; retrying 10 s later returns 201. | A demo deployment doesn't justify always-warm pricing. Cache-hit path (`/categorize` w/o `force`) is DB-only and survives even before Qdrant is ready. | `--min-instances=1` (paid), or migrate to external Qdrant Cloud (removes the reindex window entirely). |
-| **PDF endpoint isn't deployed in Cloud Run** | `POST /invoices` (PDF) requires the RQ worker + a worker-side Redis; the live demo runs only the API container, so PDF upload returns a job_id whose status will never advance. KSeF + categorize + search are demo-facing. | The PDF path is fully exercised by the test suite and [`docker-compose.yml`](docker-compose.yml); deploying the worker would double infra cost (~$8/month for a second always-on Cloud Run service) for one extra ingestion path that doesn't affect the demo narrative. | Spin a second Cloud Run service for the worker (same image, override the entrypoint to `rq worker default`) once volume warrants it. |
-| **Langfuse Hobby tier — 30-day retention + variable flush latency** | Public dashboard URLs expire and traces older than 30 days are deleted. Flush latency from Cloud Run to Langfuse Cloud usually takes <60 s but has been observed up to ~20 min under load. | Static screenshots in [`docs/langfuse_*.png`](docs/) are checked in as permanent evidence. The service still works without Langfuse — keys absent → no-op decorator. | Upgrade to a paid Langfuse plan or self-host (the `@observe` instrumentation is portable). |
+| **PDF endpoint isn't deployed in Cloud Run** | `POST /invoices` (PDF) requires the RQ worker + a worker-side Redis; the live demo runs only the API container, so PDF upload returns a job_id whose status will never advance. KSeF + categorize + search are demo-facing. | The PDF path is fully exercised by the test suite and [`docker-compose.yml`](docker-compose.yml); deploying the worker would double infra cost (≈$8/month for a second always-on Cloud Run service) for one extra ingestion path that doesn't affect the demo narrative. | Spin a second Cloud Run service for the worker (same image, override the entrypoint to `rq worker default`) once volume warrants it. |
+| **Langfuse Hobby tier — 30-day retention + variable flush latency** | Public dashboard URLs expire and traces older than 30 days are deleted. Flush latency from Cloud Run to Langfuse Cloud usually takes <60 s but has been observed up to ≈20 min under load. | Static screenshots in [`docs/langfuse_*.png`](docs/) are checked in as permanent evidence. The service still works without Langfuse — keys absent → no-op decorator. | Upgrade to a paid Langfuse plan or self-host (the `@observe` instrumentation is portable). |
 
 ---
 
@@ -435,7 +435,7 @@ The worker and API share one image; docker-compose overrides the default `uvicor
 # One-time setup (no Docker, requires Python 3.11 — torch wheels not available for 3.13 yet)
 pip install -e ".[dev]"
 
-pytest                         # full suite, ~5 seconds
+pytest                         # full suite, ≈5 seconds
 pytest --cov=app --cov-report=term-missing
 ```
 
@@ -495,7 +495,7 @@ tests/
   fixtures/
     ksef/                   # fa3_minimal.xml (Swagger Try-it-out demo file)
     labeled/                # manifest.json + 11 synthetic FA(3) for eval
-  ...                       # 169 tests total, hermetic, ~5 s
+  ...                       # 169 tests total, hermetic, ≈5 s
 ```
 
 ---
