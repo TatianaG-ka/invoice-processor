@@ -45,7 +45,7 @@ downstream:
 
 ## Architecture
 
-![Invoice processing architecture](docs/inne/invoice_processing_architecture.png)
+![Invoice processing architecture](docs/images/invoice_processing_architecture.png)
 
 
 **The diagram shows the full flow:** the client/n8n sends requests to FastAPI, which either queues work through Redis + RQ (where the worker performs OCR and extraction with OpenAI) or parses KSeF XML directly. The result, ExtractedInvoice, is written in parallel to PostgreSQL and Qdrant; categorization uses RAG, with Qdrant neighbours passed as few-shot examples to OpenAI, and the result is stored back in PostgreSQL. Everything runs inside Cloud Run, while Langfuse collects traces from FastAPI. The dotted lines represent helper actions such as triggering categorization and reindexing on startup.
@@ -141,9 +141,9 @@ evaluated against ground truth. That's a deliberate choice, not a gap:
 
 | Component | Endpoint | Why eval makes sense here? |
 |---|---|---|
-| **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef`, `POST /invoices` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 155 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
-| **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search?q=...` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to an 11-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
-| **LLM categorization (RAG)** | `POST /invoices/{id}/categorize` | **Yes — this is what `scripts/eval_categorization.py` measures.** |
+| **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 155 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
+| **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to an 11-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
+| **LLM categorization (RAG)** | `POST /invoices/{invoice_id}/categorize` | **Yes — this is what `scripts/eval_categorization.py` measures.** |
 
 Categorization is the component where the LLM actually makes a discrete
 decision against a finite set of categories — ground truth is naturally binary
@@ -164,7 +164,7 @@ earns its keep.
 
 **Per-category accuracy** - see breakdown here:
 
-![Eval report — per-category accuracy breakdown](docs/inne/eval_report.png)
+![Eval report — per-category accuracy breakdown](docs/eval/eval_report.png)
 
   
 **Same eval run captured in Langfuse cost dashboard:**
@@ -324,10 +324,10 @@ The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbo
 | [`n8n/99_error_handler.json`](n8n/99_error_handler.json) | Bound as `errorWorkflow` on the main flow. Error Trigger → extract context → fan-out to Sheets `errors` tab + Slack alert with execution id |
 
 **n8n/01_ksef_ingestion**
-![n8n KSeF ingestion workflow](docs/inne/WF_01.png)
+![n8n KSeF ingestion workflow](docs/images/WF_01.png)
 
 **`n8n/99_error_handler**
-![n8n error handler workflow](docs/inne/WF_02.png)
+![n8n error handler workflow](docs/images/WF_02.png)
 
 The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201`.
 
