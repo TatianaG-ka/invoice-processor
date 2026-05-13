@@ -10,7 +10,7 @@
 
 ![CI](https://github.com/TatianaG-ka/invoice-processor/actions/workflows/ci.yml/badge.svg)
 
-Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal.xml`](https://raw.githubusercontent.com/TatianaG-ka/invoice-processor/main/tests/fixtures/ksef/fa3_minimal.xml) (right-click → *Save link as…*) → *Execute* → see the parsed invoice + assigned `id`. Then browse with `GET /invoices`, classify with `POST /invoices/{id}/categorize`, and search semantically with `GET /invoices/search?q=Acme`. The full happy path is on the Swagger landing page itself.
+Open Swagger → `POST /invoices/ksef` → *Try it out* → upload [`fa3_minimal.xml`](https://raw.githubusercontent.com/TatianaG-ka/invoice-processor/main/tests/fixtures/ksef/fa3_minimal.xml) (right-click → *Save link as…*) → *Execute* → see the parsed invoice + assigned `id`. Then browse with `GET /invoices`, classify with `POST /invoices/{invoice_id}/categorize`, and search semantically with `GET /invoices/search?q=Acme`. The full happy path is on the Swagger landing page itself.
 
 ---
 
@@ -37,9 +37,9 @@ Concretely: three ingestion shapes (scanned PDFs, text-layer PDFs, KSeF XML)
 normalise into one typed record. The API surfaces three things that matter
 downstream:
 
-1. **Structured fields** behind `GET /invoices/{id}` — seller, buyer, line items, totals, dates — all in a consistent JSON shape regardless of ingestion path.
+1. **Structured fields** behind `GET /invoices/{invoice_id}` — seller, buyer, line items, totals, dates — all in a consistent JSON shape regardless of ingestion path.
 2. **Semantic retrieval** behind `GET /invoices/search?q=...` — cosine similarity over sentence embeddings of seller name + line-item descriptions, so "find invoices about printer toner" works without exact-string matching.
-3. **LLM categorization** behind `POST /invoices/{id}/categorize` — RAG over Qdrant neighbours + `gpt-4o-mini` few-shot, persisted to the `invoices` row. Idempotent: subsequent calls return the cached category from Postgres in <100 ms with no LLM hit; `?force=true` overrides for prompt iterations.
+3. **LLM categorization** behind `POST /invoices/{invoice_id}/categorize` — RAG over Qdrant neighbours + `gpt-4o-mini` few-shot, persisted to the `invoices` row. Idempotent: subsequent calls return the cached category from Postgres in <100 ms with no LLM hit; `?force=true` overrides for prompt iterations.
 
 ---
 
@@ -59,14 +59,14 @@ downstream:
 | HTTP API | FastAPI 0.115 + Pydantic v2 | Async endpoints, automatic OpenAPI |
 | Relational DB | PostgreSQL 16 (Neon managed in prod) | async SQLAlchemy 2.0 + asyncpg |
 | Vector store | Qdrant 1.11 (embedded in prod, server in dev) | 384-dim cosine over MiniLM |
-| Background queue | Redis + RQ 2.0 | `POST /invoices` (PDF) enqueues, worker does extract + persist + index |
-| PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically |
+| Background queue | Redis + RQ 2.0 | `POST /invoices` (PDF) enqueues, worker does extract + persist + index — **local dev only** (worker not deployed on Cloud Run, [see why](#known-limitations)) |
+| PDF text | pdfplumber → pytesseract + pdf2image OCR fallback | Scanned PDFs handled automatically by the same PDF worker (local dev only) |
 | KSeF XML | lxml with dual-schema support | FA(2) legacy + FA(3) `http://crd.gov.pl/wzor/2025/06/25/13775/` |
 | LLM extraction | OpenAI `gpt-4o-mini` Structured Outputs | Deterministic JSON, ~$0.000274/call |
 | LLM categorization (RAG) | OpenAI `gpt-4o-mini` + few-shot from Qdrant top-3 neighbours | Persisted in `invoices.category`; idempotent endpoint, ~$0.000156/call |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` | 384-dim, multilingual, ~80 MB |
 | Observability | Langfuse Cloud | `@observe` on OpenAI calls (extraction + categorization), token/cost tracking |
-| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 155 tests, ~5 s full run |
+| Testing | pytest + pytest-asyncio + fakeredis + in-memory Qdrant | 169 tests, ~5 s full run |
 | CI | GitHub Actions (ruff + pytest against real Postgres + Redis services) | Green gate on every push |
 | Deploy | Google Cloud Run (Warsaw, `europe-central2`) | Multi-stage Dockerfile, Cloud Build from source |
 
@@ -84,6 +84,8 @@ downstream:
 | `GET  /invoices/{invoice_id}` | 200 + `StoredInvoice` | Retrieve by DB primary key |
 
 Every DB-touching endpoint narrows `sqlalchemy.exc.SQLAlchemyError` into a clean `503 Database temporarily unavailable.` — no stack trace ever reaches the wire.
+
+> ℹ️ **PDF ingestion is hidden from this public demo.** `POST /invoices` (PDF upload) + the OCR worker (`pdfplumber` + `pytesseract`) require an always-on RQ worker container. Cloud Run runs API-only to keep hosting at **$0 / month** — deploying the worker would double infra cost (~$8/mc) for one extra ingestion path that doesn't change the demo narrative. The PDF path is **fully wired and tested**, runs end-to-end via `docker-compose up`. KSeF + categorize + search + retrieve cover the deployed surface. Full rationale + deploy escape hatch in [Known limitations](#known-limitations).
 
 ---
 
@@ -141,7 +143,7 @@ evaluated against ground truth. That's a deliberate choice, not a gap:
 
 | Component | Endpoint | Why eval makes sense here? |
 |---|---|---|
-| **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 155 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
+| **Structured extraction** (LLM → typed JSON) | `POST /invoices/ksef` | Not yet. For KSeF XML, "correct extraction" is bounded by the source schema, not the model — accuracy reduces to "did `lxml` parse correctly?", which the 169 unit tests already cover. For the PDF path (OCR + LLM), eval would make sense, but the worker isn't deployed in prod (see [Known limitations](#known-limitations)). |
 | **Semantic retrieval** (cosine over embeddings) | `GET /invoices/search` | Not yet. Search accuracy requires query→relevance judgments ("for query 'printer toner', invoice #5 is relevant, #12 is not"), which don't scale to an 11-fixture demo set. Meaningful only at 200+ invoices with real user queries. |
 | **LLM categorization (RAG)** | `POST /invoices/{invoice_id}/categorize` | **Yes — this is what `scripts/eval_categorization.py` measures.** |
 
@@ -152,7 +154,7 @@ expense-policy reporting). It's also the only path where prompt or model
 changes can silently regress without unit tests catching it. That's where eval
 earns its keep.
 
-### Latest run ([`eval_report`](docs/eval/baseline_2026-05-11.json))
+### Latest run ([baseline run — JSON](docs/eval/baseline_2026-05-11.json))
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -202,14 +204,14 @@ python scripts/eval_categorization.py \
     --url https://invoice-processor-510066601703.europe-central2.run.app
 
 # Persist results for the commit log
-python scripts/eval_categorization.py --out docs/eval/run_$(date +%Y_%m_%d).json
+python scripts/eval_categorization.py --out docs/eval/baseline_$(date +%Y-%m-%d).json
 
 # CI gate (exit 1 if accuracy below floor)
 python scripts/eval_categorization.py --min-accuracy 0.80
 ```
 
 The script uploads each labeled fixture via `POST /invoices/ksef`, then
-categorizes via `POST /invoices/{id}/categorize?force=true` to bypass the DB
+categorizes via `POST /invoices/{invoice_id}/categorize?force=true` to bypass the DB
 cache (ADR-007) and measure the LLM on every call. It exercises the full
 production code path: embed target → Qdrant top-3 → few-shot prompt →
 `gpt-4o-mini` Structured Outputs → persisted category.
@@ -252,8 +254,8 @@ from a single manifest at
 | `Sprzęt i wyposażenie` | 1 | Discrimination from IT (laptop ≠ software) |
 
 **Coverage gap (explicit):** 6 of the 12 categories in `InvoiceCategory` are
-covered. The remaining 6 (`Telekomunikacja`, `Media`, `Usługi prawne`,
-`Szkolenia i edukacja`, `Najem`, `Catering`, `Inne`) are intentionally out of
+covered. The remaining 6 (`Telekomunikacja`, `Media`, `Najem`,
+`Szkolenia i edukacja`, `Catering`, `Inne`) are intentionally out of
 scope for this demo eval — adding meaningful signal across all 12 would
 require ~30+ fixtures for statistical reliability on rare categories, which is
 past the demo's $-budget (~$0.005 / run vs ~$0.0017 now).
@@ -326,7 +328,7 @@ The service is consumed end-to-end by an n8n workflow that simulates a KSeF inbo
 **n8n/01_ksef_ingestion**
 ![n8n KSeF ingestion workflow](docs/images/WF_01.png)
 
-**`n8n/99_error_handler**
+**`n8n/error_handler**
 ![n8n error handler workflow](docs/images/WF_02.png)
 
 The HTTP node calls the live Cloud Run URL with `multipart/form-data`, `fullResponse: true` and `neverError: true` so the IF branch can route on `statusCode` instead of n8n auto-failing on 4xx/5xx. `typeValidation: "loose"` is set on the IF node because n8n's HTTP transport occasionally returns `statusCode` as a string — strict mode silently rejects `"201" === 201`.
@@ -386,7 +388,7 @@ The service degrades gracefully when Langfuse keys are absent: the decorator see
 
 ### ADR-007 — DB-cached LLM categorization (RAG + idempotency by default)
 **Context:** Once an invoice is in the system, the next question is "what kind of expense is it?" — needed for ledger coding, expense-policy reporting, and downstream analytics. A pure-LLM endpoint would (a) cost a real-money OpenAI call on every request, even for invoices that haven't changed, and (b) miss the signal already in Qdrant: invoices similar to this one have *already* been categorized by a human or a prior LLM run.  
-**Decision:** `POST /invoices/{id}/categorize` runs a small RAG flow — embed target → Qdrant top-3 already-categorized neighbours → few-shot prompt → `gpt-4o-mini` Structured Outputs → persist `category` + `category_confidence` to the `invoices` row. Subsequent calls return the persisted value with `cached=true` and `200 OK` (no LLM hit), mirroring the idempotency contract from ADR-006. `?force=true` overrides the cache for prompt-engineering iterations. Schema migration (two new columns + index) is applied via [`scripts/migrate_add_category.sql`](scripts/migrate_add_category.sql) — idempotent `IF NOT EXISTS` — because ADR-002 explicitly defers Alembic; for the demo's "few-tables, append-mostly" shape, raw SQL scripts under `scripts/` are the canonical migration channel.  
+**Decision:** `POST /invoices/{invoice_id}/categorize` runs a small RAG flow — embed target → Qdrant top-3 already-categorized neighbours → few-shot prompt → `gpt-4o-mini` Structured Outputs → persist `category` + `category_confidence` to the `invoices` row. Subsequent calls return the persisted value with `cached=true` and `200 OK` (no LLM hit), mirroring the idempotency contract from ADR-006. `?force=true` overrides the cache for prompt-engineering iterations. Schema migration (two new columns + index) is applied via [`scripts/migrate_add_category.sql`](scripts/migrate_add_category.sql) — idempotent `IF NOT EXISTS` — because ADR-002 explicitly defers Alembic; for the demo's "few-tables, append-mostly" shape, raw SQL scripts under `scripts/` are the canonical migration channel.  
 **Consequence:** Re-categorization is free (DB read), and prompt changes can be A/B-tested via `?force=true` without touching the schema. The persisted `reasoning` is intentionally not stored — only `category` + `confidence` — to keep the row narrow; the reasoning lives in the response of the originating call and (with full prompt + output) in the Langfuse trace. Operational caveat: the categorize path needs Qdrant ready, so the first call after a cold start can hit the reindex window (see Known limitations below).  
 
 ### ADR-008 — n8n as a loose-coupled pipeline client
@@ -437,7 +439,7 @@ pytest                         # full suite, ~5 seconds
 pytest --cov=app --cov-report=term-missing
 ```
 
-**155 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries, **Redis idempotency layer** (retry-dedup + Redis-outage fallthrough), **LLM categorization** (happy path + cache hit + `?force=true` + zero-shot fallback when Qdrant empty + 502 on LLM failure). Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ (sync API for the queue, async API for idempotency), `QdrantClient(":memory:")`, deterministic fake embedder, mocked OpenAI in categorize tests — no external network on any test run.
+**169 tests** cover every module that moves data — PDF text + OCR, OpenAI extractor, KSeF parser (FA(2) + FA(3) fixtures), repository + persistence, queue tasks, vector store + reindex, search endpoint, DB-URL normalisation, HTTP error boundaries, **Redis idempotency layer** (retry-dedup + Redis-outage fallthrough), **LLM categorization** (happy path + cache hit + `?force=true` + zero-shot fallback when Qdrant empty + 502 on LLM failure). Hermetic by design: in-memory SQLite via aiosqlite, `fakeredis` + synchronous RQ (sync API for the queue, async API for idempotency), `QdrantClient(":memory:")`, deterministic fake embedder, mocked OpenAI in categorize tests — no external network on any test run.
 
 ---
 
@@ -460,6 +462,7 @@ app/
     invoice.py              # ExtractedInvoice, StoredInvoice, SearchHit, SearchResponse
     job.py                  # JobAccepted, JobStatus
     category.py             # InvoiceCategory enum + LLMCategorizationResponse + CategorizationResult
+    stats.py                # InvoiceStats + CategoryStats (GET /invoices/stats, hidden from Swagger)
   services/
     pdf_text_extractor.py   # pdfplumber + OCR fallback
     invoice_extractor.py    # OpenAI Structured Outputs, Langfuse-instrumented
@@ -467,17 +470,32 @@ app/
     ksef_parser.py          # dual-schema FA(2) + FA(3) XML → ExtractedInvoice
     embedder.py             # SentenceTransformer lazy singleton
     vector_store.py         # Qdrant wrapper + index_invoice + reindex_all
+    idempotency.py          # Redis-backed (seller_nip, invoice_number) dedup, 24h TTL (ADR-006)
 
 scripts/
   deploy_cloud_run.sh       # env-loading wrapper around `gcloud run deploy --source .`
   smoke_test_prod.sh        # curl-driven end-to-end verification of a live revision
   migrate_add_category.sql  # idempotent `ALTER TABLE` for ADR-007 columns (Neon SQL editor)
+  eval_categorization.py    # LLM categorization accuracy eval (top-1, calibration, A/B)
+  generate_eval_fixtures.py # synthesize 11 labeled KSeF FA(3) XML from manifest.json
+
+n8n/
+  01_ksef_ingestion.json    # main workflow: schedule → POST /invoices/ksef → Slack + Sheets
+  99_error_handler.json     # errorWorkflow — fan non-2xx outcomes to Sheets + Slack alert
 
 docs/
   dane_testowe/             # synthetic PDF + KSeF fixtures (no real NIPs)
-  langfuse_*.png            # observability screenshots (snapshot evidence, retention-independent)
+  eval/                     # baseline JSON + Langfuse screenshots (eval evidence)
+  images/                   # architecture diagram + n8n workflow snapshots
+  langfuse_*.png            # extraction/categorize trace screenshots (retention-independent)
+  idempotency_smoke_test.png  # live 201 → 200 same-id flip (ADR-006 evidence)
+  swagger_fastapi.png       # public Swagger surface snapshot
 
-tests/                      # 155 tests, hermetic, ~5 s
+tests/
+  fixtures/
+    ksef/                   # fa3_minimal.xml (Swagger Try-it-out demo file)
+    labeled/                # manifest.json + 11 synthetic FA(3) for eval
+  ...                       # 169 tests total, hermetic, ~5 s
 ```
 
 ---
